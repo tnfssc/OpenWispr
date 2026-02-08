@@ -12,3 +12,6 @@ test_output.wav.txt
 
 # GNOME compiled schemas
 extension/schemas/gschemas.compiled
+
+dist/
+out/
