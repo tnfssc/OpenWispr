@@ -1,0 +1,8 @@
+{
+  "uuid": "openwispr-gnome-extension@tnfssc.github.com",
+  "name": "openwispr-gnome-extension",
+  "description": "AI-powered voice-to-text dictation for GNOME.",
+  "settings-schema": "org.gnome.shell.extensions.openwispr",
+  "shell-version": ["45", "46", "47", "48", "49"],
+  "url": "http://github.com/tnfssc/openwispr-gnome-extension"
+}

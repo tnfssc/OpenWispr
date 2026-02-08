@@ -1,0 +1,14 @@
+# Models
+*.bin
+extension/models/*.bin
+models/*.bin
+
+# Logs and temp files
+*.log
+*.wav
+*.wav.txt
+test_file.txt
+test_output.wav.txt
+
+# GNOME compiled schemas
+extension/schemas/gschemas.compiled
