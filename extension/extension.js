@@ -15,6 +15,7 @@ const TRIMMED_OUTPUT_FILE = GLib.get_tmp_dir() + '/openwispr_recording_trimmed.w
 const WHISPER_BINARY = GLib.find_program_in_path('whisper-cli') || '/usr/bin/whisper-cli';
 const FFMPEG_BINARY = GLib.find_program_in_path('ffmpeg') || '/usr/bin/ffmpeg';
 const CURL_BINARY = GLib.find_program_in_path('curl') || '/usr/bin/curl';
+const DEBUG_LOGS = false;
 
 export default class OpenWisprExtension extends Extension {
     enable() {
@@ -83,7 +84,7 @@ export default class OpenWisprExtension extends Extension {
             this._notificationsEnabled = this._settings.get_boolean('notifications-enabled');
         });
 
-        console.log(`[openwispr-gnome-extension] Enabled. Model: ${this._modelPath}`);
+        this._debug(`Enabled. Model: ${this._modelPath}`);
     }
 
     disable() {
@@ -193,26 +194,13 @@ export default class OpenWisprExtension extends Extension {
         if (this._recording || this._processing)
             return;
 
-        console.log(`[openwispr-gnome-extension] Starting recording (${trigger})...`);
+        this._debug(`Starting recording (${trigger})...`);
         this._recording = true;
         this._recordingTrigger = trigger;
         this._icon.icon_name = 'media-record-symbolic';
         this._icon.style_class = 'system-status-icon destructive-action'; // Red-ish if theme supports
 
         try {
-            // Spawn gjs -m script
-            // Note: record_audio.js writes to hardcoded 'test_output.wav' in current dir in prototype
-            // We should update it to accept an argument, but for now let's use the prototype's default or PWD
-            // Actually, best to update the script to write to OUTPUT_FILE. 
-            // For now, let's pass cwd to the subprocess so it writes there, or modify the script.
-            // Let's assume we modify the script to take a filename argument. 
-            // I'll update the script in a separate step if needed. 
-            // For now, I'll assume standard gjs execution.
-            
-            // To be safe, I'll update the script to use the first argument as filename
-            // and default to OUTPUT_FILE if not provided.
-            // But let's pass the logic here.
-            
             const proc = new Gio.Subprocess({
                 argv: ['gjs', '-m', this._recorderScript, OUTPUT_FILE],
                 flags: Gio.SubprocessFlags.NONE
@@ -230,7 +218,7 @@ export default class OpenWisprExtension extends Extension {
     _stopRecording(transcribe = true) {
         if (!this._recording) return;
 
-        console.log(`[openwispr-gnome-extension] Stopping recording (${this._recordingTrigger ?? 'unknown'})...`);
+        this._debug(`Stopping recording (${this._recordingTrigger ?? 'unknown'})...`);
         if (this._recordingTrigger === 'hold')
             this._holdStartCooldownUntilUs = GLib.get_monotonic_time() + 750000;
 
@@ -246,7 +234,7 @@ export default class OpenWisprExtension extends Extension {
             this._recordProc.wait_async(null, (proc, res) => {
                 try {
                     proc.wait_finish(res);
-                    console.log('[openwispr-gnome-extension] Recorder exited.');
+                    this._debug('Recorder exited.');
                     if (transcribe) {
                         this._processRecordingPipeline();
                     } else {
@@ -273,7 +261,7 @@ export default class OpenWisprExtension extends Extension {
 
                 this._cleanupTranscript(transcript, (cleanedText) => {
                     const finalText = (cleanedText ?? transcript ?? '').trim();
-                    console.log(`[openwispr-gnome-extension] Text: ${finalText}`);
+                    this._debug(`Text: ${finalText}`);
 
                     if (finalText) {
                         this._notify(`Transcribed: ${finalText}`);
@@ -352,7 +340,7 @@ export default class OpenWisprExtension extends Extension {
     }
 
     _transcribeLocal(inputPath, callback) {
-        console.log('[openwispr-gnome-extension] Transcribing with local whisper-cli...');
+        this._debug('Transcribing with local whisper-cli...');
 
         this._runSubprocess(
             [
@@ -408,7 +396,7 @@ export default class OpenWisprExtension extends Extension {
             return;
         }
 
-        console.log(`[openwispr-gnome-extension] Transcribing with ${provider} endpoint...`);
+        this._debug(`Transcribing with ${provider} endpoint...`);
         this._runSubprocess(
             [
                 CURL_BINARY,
@@ -615,7 +603,7 @@ export default class OpenWisprExtension extends Extension {
             // Ctrl Release
             virtualDevice.notify_keyval(time++, Clutter.KEY_Control_L, Clutter.KeyState.RELEASED);
             
-            console.log('[openwispr-gnome-extension] Text injected via Clipboard Paste');
+            this._debug('Text injected via clipboard paste');
             
         } catch (e) {
             console.error(`[openwispr-gnome-extension] Injection failed: ${e}`);
@@ -646,5 +634,12 @@ export default class OpenWisprExtension extends Extension {
             this._icon.icon_name = 'microphone-sensitivity-high-symbolic';
             this._icon.style_class = 'system-status-icon';
         }
+    }
+
+    _debug(message) {
+        if (!DEBUG_LOGS)
+            return;
+
+        console.debug(`[openwispr-gnome-extension] ${message}`);
     }
 }

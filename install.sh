@@ -25,7 +25,7 @@ echo ""
 echo "👉 Next steps:"
 echo "1. Log out and log back in (or restart GNOME Shell if on X11 with Alt+F2, 'r')."
 echo "2. Enable the extension: gnome-extensions enable $UUID"
-echo "3. Press Ctrl+Alt+R to toggle recording!"
+echo "3. Open extension preferences to set an optional keyboard shortcut."
 echo ""
 echo "Dependencies check:"
 if which whisper-cli >/dev/null; then

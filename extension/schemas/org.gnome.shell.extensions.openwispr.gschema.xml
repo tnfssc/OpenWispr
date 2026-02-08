@@ -2,19 +2,19 @@
 <schemalist>
   <schema id="org.gnome.shell.extensions.openwispr" path="/org/gnome/shell/extensions/openwispr/">
     <key name="hold-to-speak-enabled" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Enable hold to speak mode</summary>
     </key>
     <key name="hold-to-speak-trigger" type="s">
-      <default>'ctrl-alt-space'</default>
+      <default>''</default>
       <summary>Legacy hold to speak trigger key</summary>
     </key>
     <key name="hold-to-speak-keybinding" type="as">
-      <default><![CDATA[['<Control><Alt>space']]]></default>
+      <default>[]</default>
       <summary>Legacy hold to speak keybinding</summary>
     </key>
     <key name="auto-paste-enabled" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Automatically paste transcribed text into active app</summary>
     </key>
     <key name="notifications-enabled" type="b">
@@ -98,7 +98,7 @@
       <summary>Prompt used for LLM transcript cleanup</summary>
     </key>
     <key name="toggle-recording" type="as">
-      <default><![CDATA[['<Control><Alt>r']]]></default>
+      <default>[]</default>
       <summary>Toggle recording</summary>
     </key>
   </schema>

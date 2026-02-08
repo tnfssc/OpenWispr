@@ -5,8 +5,8 @@
 ## Features
 
 - **Local or Remote Processing**: Use local `whisper-cli` or remote STT endpoints (OpenAI/Groq), configurable per setup.
-- **Global Shortcut**: Toggle recording instantly with `Ctrl+Alt+R` (customizable).
-- **Hold to Speak**: Hold `Ctrl+Alt+Space` to record and release to transcribe.
+- **Optional Keyboard Shortcuts**: Configure your own shortcut for toggle recording in preferences.
+- **Hold to Speak**: Optional mode to hold `Ctrl+Alt+Space` to record and release to transcribe.
 - **Silence Cutting**: Uses `ffmpeg` to cut silent parts before transcription.
 - **Configurable STT Backends**: Choose local `whisper-cli`, OpenAI Whisper endpoint, or Groq endpoint.
 - **LLM Transcript Cleanup**: Optionally post-process transcript text with OpenAI or Groq models.
@@ -60,7 +60,7 @@ Before installing, ensure you have the following dependencies:
 
 ## Usage
 
-1.  **Start Dictation**: Click the microphone icon in the top bar or press `Ctrl+Alt+R`.
+1.  **Start Dictation**: Click the microphone icon in the top bar, or set a custom keyboard shortcut in preferences.
     *   The icon will change to a recording indicator.
     *   You can also hold `Ctrl+Alt+Space`.
 2.  **Speak**: Dictate your text clearly.
@@ -73,7 +73,7 @@ Before installing, ensure you have the following dependencies:
 
 ## Configuration
 
-You can configure the keyboard shortcut using the `dconf-editor` or by modifying the schema:
+The extension does not ship with a default keyboard shortcut. You can configure one in preferences, with `dconf-editor`, or by modifying the schema:
 *   **Schema**: `org.gnome.shell.extensions.openwispr`
 *   **Key**: `toggle-recording`
 

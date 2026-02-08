@@ -1,0 +1,86 @@
+name: Build GNOME Extension ZIP
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Package extension for e.g.o
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install packaging tools
+        run: sudo apt-get update && sudo apt-get install -y libglib2.0-bin jq zip rsync
+
+      - name: Build extension zip
+        id: build
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+
+          EXT_DIR="extension"
+          METADATA_FILE="$EXT_DIR/metadata.json"
+
+          UUID="$(jq -r '.uuid' "$METADATA_FILE")"
+          if [[ -z "$UUID" || "$UUID" == "null" ]]; then
+            echo "metadata.json is missing a valid uuid"
+            exit 1
+          fi
+
+          VERSION="${RELEASE_TAG:-manual-${GITHUB_SHA::7}}"
+          VERSION="${VERSION#v}"
+
+          BUILD_DIR="$(mktemp -d)"
+          STAGE_DIR="$BUILD_DIR/$UUID"
+          ZIP_NAME="${UUID}-${VERSION}.zip"
+          ZIP_PATH="$BUILD_DIR/$ZIP_NAME"
+
+          mkdir -p "$STAGE_DIR"
+
+          rsync -a \
+            --exclude 'models/' \
+            --exclude 'schemas/gschemas.compiled' \
+            "$EXT_DIR/" "$STAGE_DIR/"
+
+          if [[ -d "$STAGE_DIR/schemas" ]] && compgen -G "$STAGE_DIR/schemas/*.gschema.xml" > /dev/null; then
+            glib-compile-schemas "$STAGE_DIR/schemas"
+          fi
+
+          if [[ ! -f "$STAGE_DIR/metadata.json" || ! -f "$STAGE_DIR/extension.js" ]]; then
+            echo "Package is missing required extension files"
+            exit 1
+          fi
+
+          (
+            cd "$STAGE_DIR"
+            zip -r "$ZIP_PATH" .
+          )
+
+          echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
+          echo "zip_path=$ZIP_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.build.outputs.zip_name }}
+          path: ${{ steps.build.outputs.zip_path }}
+          if-no-files-found: error
+
+      - name: Attach zip to GitHub Release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          ZIP_PATH: ${{ steps.build.outputs.zip_path }}
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG" "$ZIP_PATH" --clobber
