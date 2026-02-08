@@ -10,8 +10,8 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import { Extension, gettext as _ } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 // Constants
-const WHISPER_BINARY = '/usr/bin/whisper-cli';
 const OUTPUT_FILE = GLib.get_tmp_dir() + '/openwispr_recording.wav';
+const WHISPER_BINARY = GLib.find_program_in_path('whisper-cli') || '/usr/bin/whisper-cli';
 
 export default class OpenWisprExtension extends Extension {
     enable() {

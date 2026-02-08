@@ -15,6 +15,11 @@ rm -rf "$DEST"
 # Symlink
 ln -s "$(pwd)/extension" "$DEST"
 
+# Compile schemas
+echo "⚙️  Compiling schemas..."
+glib-compile-schemas "$DEST/schemas"
+
+
 echo "✅ Installed to $DEST"
 echo ""
 echo "👉 Next steps:"
