@@ -6,10 +6,11 @@
 
 - **Local Processing**: All audio is processed locally on your machine using `whisper-cli`. No data leaves your computer.
 - **Global Shortcut**: Toggle recording instantly with `Ctrl+Alt+R` (customizable).
-- **Hold to Speak**: Hold a trigger key (`Ctrl+/`, `Ctrl+Space`, `Right Ctrl`, `F8`, or `F9`) to record and release to transcribe.
+- **Hold to Speak**: Hold `Ctrl+Alt+Space` to record and release to transcribe.
 - **System Integration**: Seamless integration with the GNOME top bar.
 - **Clipboard Injection**: Automatically pastes transcribed text into the active text field.
 - **Clipboard-Only Mode**: Optionally copy transcription without auto-paste for apps where paste is unsafe.
+- **Configurable Notifications**: Optionally enable or disable extension notifications.
 
 ## Prerequisites
 
@@ -56,7 +57,7 @@ Before installing, ensure you have the following dependencies:
 
 1.  **Start Dictation**: Click the microphone icon in the top bar or press `Ctrl+Alt+R`.
     *   The icon will change to a recording indicator.
-    *   You can also hold your hold-to-speak trigger key (default: `Ctrl+/`).
+    *   You can also hold `Ctrl+Alt+Space`.
 2.  **Speak**: Dictate your text clearly.
 3.  **Stop & Transcribe**: Press `Ctrl+Alt+R` again to stop.
     *   If using hold-to-speak, just release the hold key/chord.
@@ -75,13 +76,13 @@ Hold-to-speak can be enabled/disabled in extension preferences or via:
 *   **Schema**: `org.gnome.shell.extensions.openwispr`
 *   **Key**: `hold-to-speak-enabled`
 
-Hold-to-speak trigger key can be selected in extension preferences or via:
-*   **Schema**: `org.gnome.shell.extensions.openwispr`
-*   **Key**: `hold-to-speak-trigger` (`ctrl-slash`, `ctrl-space`, `right-ctrl`, `f8`, `f9`)
-
 Auto-paste behavior can be toggled in extension preferences or via:
 *   **Schema**: `org.gnome.shell.extensions.openwispr`
 *   **Key**: `auto-paste-enabled`
+
+Notification behavior can be toggled in extension preferences or via:
+*   **Schema**: `org.gnome.shell.extensions.openwispr`
+*   **Key**: `notifications-enabled`
 
 ## License
 

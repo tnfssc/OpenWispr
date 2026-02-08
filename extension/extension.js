@@ -23,8 +23,8 @@ export default class OpenWisprExtension extends Extension {
         this._holdKeyPressed = false;
         this._holdStartCooldownUntilUs = 0;
         this._holdToSpeakEnabled = this._settings.get_boolean('hold-to-speak-enabled');
-        this._holdToSpeakTrigger = this._settings.get_string('hold-to-speak-trigger');
         this._autoPasteEnabled = this._settings.get_boolean('auto-paste-enabled');
+        this._notificationsEnabled = this._settings.get_boolean('notifications-enabled');
 
         // resolve paths relative to extension dir
         this._modelPath = this.dir.get_child('models').get_child('ggml-base.en.bin').get_path();
@@ -71,12 +71,12 @@ export default class OpenWisprExtension extends Extension {
             }
         });
 
-        this._holdToSpeakTriggerChangedId = this._settings.connect('changed::hold-to-speak-trigger', () => {
-            this._holdToSpeakTrigger = this._settings.get_string('hold-to-speak-trigger');
-        });
-
         this._autoPasteChangedId = this._settings.connect('changed::auto-paste-enabled', () => {
             this._autoPasteEnabled = this._settings.get_boolean('auto-paste-enabled');
+        });
+
+        this._notificationsChangedId = this._settings.connect('changed::notifications-enabled', () => {
+            this._notificationsEnabled = this._settings.get_boolean('notifications-enabled');
         });
 
         console.log(`[openwispr-gnome-extension] Enabled. Model: ${this._modelPath}`);
@@ -95,14 +95,14 @@ export default class OpenWisprExtension extends Extension {
             this._holdToSpeakChangedId = null;
         }
 
-        if (this._settings && this._holdToSpeakTriggerChangedId) {
-            this._settings.disconnect(this._holdToSpeakTriggerChangedId);
-            this._holdToSpeakTriggerChangedId = null;
-        }
-
         if (this._settings && this._autoPasteChangedId) {
             this._settings.disconnect(this._autoPasteChangedId);
             this._autoPasteChangedId = null;
+        }
+
+        if (this._settings && this._notificationsChangedId) {
+            this._settings.disconnect(this._notificationsChangedId);
+            this._notificationsChangedId = null;
         }
         
         if (this._indicator) {
@@ -148,7 +148,7 @@ export default class OpenWisprExtension extends Extension {
                 this._startRecording('hold');
             }
         } else if (eventType === Clutter.EventType.KEY_RELEASE) {
-            if (this._isHoldToSpeakReleaseEvent(keySymbol)) {
+            if (this._isHoldToSpeakReleaseEvent(keySymbol, modifiers)) {
                 this._holdKeyPressed = false;
 
                 if (this._recording && this._recordingTrigger === 'hold')
@@ -162,48 +162,27 @@ export default class OpenWisprExtension extends Extension {
         return Clutter.EVENT_PROPAGATE;
     }
 
-    _isHoldToSpeakChordPress(keySymbol, modifiers) {
-        const isSlashKey = keySymbol === Clutter.KEY_slash || keySymbol === Clutter.KEY_KP_Divide;
-        const hasControlModifier = Boolean(modifiers & Clutter.ModifierType.CONTROL_MASK);
-
-        return isSlashKey && hasControlModifier;
-    }
-
-    _isHoldToSpeakCtrlSpacePress(keySymbol, modifiers) {
-        return keySymbol === Clutter.KEY_space && Boolean(modifiers & Clutter.ModifierType.CONTROL_MASK);
-    }
-
     _isHoldToSpeakPressEvent(keySymbol, modifiers) {
-        if (this._holdToSpeakTrigger === 'right-ctrl')
-            return keySymbol === Clutter.KEY_Control_R;
+        const hasControlModifier = Boolean(modifiers & Clutter.ModifierType.CONTROL_MASK);
+        const hasAltModifier = Boolean(modifiers & Clutter.ModifierType.MOD1_MASK);
 
-        if (this._holdToSpeakTrigger === 'f8')
-            return keySymbol === Clutter.KEY_F8;
-
-        if (this._holdToSpeakTrigger === 'f9')
-            return keySymbol === Clutter.KEY_F9;
-
-        if (this._holdToSpeakTrigger === 'ctrl-space')
-            return this._isHoldToSpeakCtrlSpacePress(keySymbol, modifiers);
-
-        return this._isHoldToSpeakChordPress(keySymbol, modifiers);
+        return keySymbol === Clutter.KEY_space && hasControlModifier && hasAltModifier;
     }
 
-    _isHoldToSpeakReleaseEvent(keySymbol) {
-        if (this._holdToSpeakTrigger === 'right-ctrl')
-            return keySymbol === Clutter.KEY_Control_R;
+    _isHoldToSpeakReleaseEvent(keySymbol, modifiers) {
+        const releasedHoldKey =
+            keySymbol === Clutter.KEY_space ||
+            keySymbol === Clutter.KEY_Control_L ||
+            keySymbol === Clutter.KEY_Control_R ||
+            keySymbol === Clutter.KEY_Alt_L ||
+            keySymbol === Clutter.KEY_Alt_R ||
+            keySymbol === Clutter.KEY_Meta_L ||
+            keySymbol === Clutter.KEY_Meta_R;
 
-        if (this._holdToSpeakTrigger === 'f8')
-            return keySymbol === Clutter.KEY_F8;
+        const hasControlModifier = Boolean(modifiers & Clutter.ModifierType.CONTROL_MASK);
+        const hasAltModifier = Boolean(modifiers & Clutter.ModifierType.MOD1_MASK);
 
-        if (this._holdToSpeakTrigger === 'f9')
-            return keySymbol === Clutter.KEY_F9;
-
-        if (this._holdToSpeakTrigger === 'ctrl-space')
-            return keySymbol === Clutter.KEY_space || keySymbol === Clutter.KEY_Control_L || keySymbol === Clutter.KEY_Control_R;
-
-        return keySymbol === Clutter.KEY_slash || keySymbol === Clutter.KEY_KP_Divide ||
-            keySymbol === Clutter.KEY_Control_L || keySymbol === Clutter.KEY_Control_R;
+        return releasedHoldKey || !hasControlModifier || !hasAltModifier;
     }
 
     _startRecording(trigger = 'toggle') {
@@ -309,7 +288,7 @@ export default class OpenWisprExtension extends Extension {
                     
                     if (!proc.get_successful()) {
                         console.error(`[openwispr-gnome-extension] Transcription failed: ${stderr}`);
-                        Main.notify('openwispr-gnome-extension Error', 'Transcription failed.');
+                        this._notifyError('Transcription failed.');
                         this._resetState();
                         return;
                     }
@@ -328,10 +307,10 @@ export default class OpenWisprExtension extends Extension {
                             console.log(`[openwispr-gnome-extension] Text: ${text}`);
                             
                             if (text) {
-                                Main.notify('openwispr-gnome-extension', `Transcribed: ${text}`);
+                                this._notify(`Transcribed: ${text}`);
                                 this._injectText(text);
                             } else {
-                                Main.notify('openwispr-gnome-extension', 'No speech detected.');
+                                this._notify('No speech detected.');
                             }
                         } catch (e) {
                             console.error(`[openwispr-gnome-extension] Failed to read output: ${e}`);
@@ -358,7 +337,7 @@ export default class OpenWisprExtension extends Extension {
             clipboard.set_text(St.ClipboardType.CLIPBOARD, text);
 
             if (!this._autoPasteEnabled) {
-                Main.notify('openwispr-gnome-extension', 'Transcription copied to clipboard.');
+                this._notify('Transcription copied to clipboard.');
                 return;
             }
 
@@ -382,8 +361,22 @@ export default class OpenWisprExtension extends Extension {
             
         } catch (e) {
             console.error(`[openwispr-gnome-extension] Injection failed: ${e}`);
-            Main.notify('openwispr-gnome-extension', `Copied to clipboard: ${text}`);
+            this._notify(`Copied to clipboard: ${text}`);
         }
+    }
+
+    _notify(message) {
+        if (!this._notificationsEnabled)
+            return;
+
+        Main.notify('openwispr-gnome-extension', message);
+    }
+
+    _notifyError(message) {
+        if (!this._notificationsEnabled)
+            return;
+
+        Main.notify('openwispr-gnome-extension Error', message);
     }
 
     _resetState() {

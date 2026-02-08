@@ -1,6 +1,4 @@
-import Gio from 'gi://Gio';
 import Adw from 'gi://Adw';
-import Gtk from 'gi://Gtk?version=4.0';
 
 import { ExtensionPreferences, gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
@@ -18,7 +16,7 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
 
         const holdToSpeakRow = new Adw.SwitchRow({
             title: _('Hold to Speak'),
-            subtitle: _('Hold your selected trigger key to record. Release to transcribe.'),
+            subtitle: _('Hold Ctrl+Alt+Space to record. Release to transcribe.'),
             active: settings.get_boolean('hold-to-speak-enabled'),
         });
         group.add(holdToSpeakRow);
@@ -38,30 +36,16 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
             settings.set_boolean('auto-paste-enabled', autoPasteRow.active);
         });
 
-        const holdTriggerOptions = [
-            { id: 'ctrl-slash', label: _('Ctrl+/ (Recommended)') },
-            { id: 'ctrl-space', label: _('Ctrl+Space') },
-            { id: 'right-ctrl', label: _('Right Ctrl') },
-            { id: 'f8', label: _('F8') },
-            { id: 'f9', label: _('F9') },
-        ];
-
-        const holdTriggerModel = Gtk.StringList.new(holdTriggerOptions.map(option => option.label));
-        const holdTriggerRow = new Adw.ComboRow({
-            title: _('Hold Trigger Key'),
-            subtitle: _('Used only when Hold to Speak is enabled.'),
-            model: holdTriggerModel,
+        const notificationsRow = new Adw.SwitchRow({
+            title: _('Enable Notifications'),
+            subtitle: _('Show status and transcription notifications.'),
+            active: settings.get_boolean('notifications-enabled'),
         });
+        group.add(notificationsRow);
 
-        const currentHoldTrigger = settings.get_string('hold-to-speak-trigger');
-        const currentHoldTriggerIndex = holdTriggerOptions.findIndex(option => option.id === currentHoldTrigger);
-        holdTriggerRow.selected = currentHoldTriggerIndex >= 0 ? currentHoldTriggerIndex : 0;
-
-        holdTriggerRow.connect('notify::selected', () => {
-            const selectedOption = holdTriggerOptions[holdTriggerRow.selected] || holdTriggerOptions[0];
-            settings.set_string('hold-to-speak-trigger', selectedOption.id);
+        notificationsRow.connect('notify::active', () => {
+            settings.set_boolean('notifications-enabled', notificationsRow.active);
         });
-        group.add(holdTriggerRow);
 
         const currentShortcut = settings.get_strv('toggle-recording')[0] || '';
 
