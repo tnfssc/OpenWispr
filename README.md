@@ -4,9 +4,12 @@
 
 ## Features
 
-- **Local Processing**: All audio is processed locally on your machine using `whisper-cli`. No data leaves your computer.
+- **Local or Remote Processing**: Use local `whisper-cli` or remote STT endpoints (OpenAI/Groq), configurable per setup.
 - **Global Shortcut**: Toggle recording instantly with `Ctrl+Alt+R` (customizable).
 - **Hold to Speak**: Hold `Ctrl+Alt+Space` to record and release to transcribe.
+- **Silence Cutting**: Uses `ffmpeg` to cut silent parts before transcription.
+- **Configurable STT Backends**: Choose local `whisper-cli`, OpenAI Whisper endpoint, or Groq endpoint.
+- **LLM Transcript Cleanup**: Optionally post-process transcript text with OpenAI or Groq models.
 - **System Integration**: Seamless integration with the GNOME top bar.
 - **Clipboard Injection**: Automatically pastes transcribed text into the active text field.
 - **Clipboard-Only Mode**: Optionally copy transcription without auto-paste for apps where paste is unsafe.
@@ -20,6 +23,8 @@ Before installing, ensure you have the following dependencies:
 2.  **whisper-cli**: The command-line interface for the Whisper model.
     *   Ensure `whisper-cli` is installed and available in your system `PATH`.
     *   *Note: This extension expects the `whisper-cli` binary specifically.*
+3.  **ffmpeg**: Required for silence trimming.
+4.  **curl**: Required for remote STT/LLM endpoints.
 
 ## Installation
 
@@ -61,7 +66,7 @@ Before installing, ensure you have the following dependencies:
 2.  **Speak**: Dictate your text clearly.
 3.  **Stop & Transcribe**: Press `Ctrl+Alt+R` again to stop.
     *   If using hold-to-speak, just release the hold key/chord.
-    *   The extension will process the audio locally.
+    *   The extension trims silence with ffmpeg (if enabled), transcribes, then optionally runs LLM cleanup.
     *   Once complete, the text will be automatically pasted into your active window and copied to your clipboard.
 
 > Note: Some apps (especially terminals, password fields, or secure/sandboxed inputs) may block simulated paste events. In those cases, use clipboard paste manually.
@@ -83,6 +88,11 @@ Auto-paste behavior can be toggled in extension preferences or via:
 Notification behavior can be toggled in extension preferences or via:
 *   **Schema**: `org.gnome.shell.extensions.openwispr`
 *   **Key**: `notifications-enabled`
+
+Remote STT and LLM keys/endpoints are configurable in extension preferences. Relevant schema keys include:
+*   **STT**: `stt-provider`, `stt-openai-*`, `stt-groq-*`
+*   **LLM**: `llm-filter-enabled`, `llm-provider`, `llm-openai-*`, `llm-groq-*`, `llm-cleanup-prompt`
+*   **FFmpeg**: `silence-trim-enabled`, `silence-threshold`, `silence-duration`
 
 ## License
 

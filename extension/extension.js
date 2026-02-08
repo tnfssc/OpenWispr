@@ -11,11 +11,15 @@ import { Extension, gettext as _ } from 'resource:///org/gnome/shell/extensions/
 
 // Constants
 const OUTPUT_FILE = GLib.get_tmp_dir() + '/openwispr_recording.wav';
+const TRIMMED_OUTPUT_FILE = GLib.get_tmp_dir() + '/openwispr_recording_trimmed.wav';
 const WHISPER_BINARY = GLib.find_program_in_path('whisper-cli') || '/usr/bin/whisper-cli';
+const FFMPEG_BINARY = GLib.find_program_in_path('ffmpeg') || '/usr/bin/ffmpeg';
+const CURL_BINARY = GLib.find_program_in_path('curl') || '/usr/bin/curl';
 
 export default class OpenWisprExtension extends Extension {
     enable() {
         this._settings = this.getSettings();
+        this._migrateLegacyProviderNames();
         this._recording = false;
         this._processing = false;
         this._recordingTrigger = null;
@@ -244,7 +248,7 @@ export default class OpenWisprExtension extends Extension {
                     proc.wait_finish(res);
                     console.log('[openwispr-gnome-extension] Recorder exited.');
                     if (transcribe) {
-                        this._transcribe();
+                        this._processRecordingPipeline();
                     } else {
                         this._resetState();
                     }
@@ -259,75 +263,329 @@ export default class OpenWisprExtension extends Extension {
         }
     }
 
-    _transcribe() {
-        console.log('[openwispr-gnome-extension] Transcribing...');
-        
-        // The recorder script currently writes to "test_output.wav" in CWD.
-        // We need to know where that is. Since extension runs in gnome-shell, CWD is often home.
-        // I will update the recorder script to use an absolute path to be safe.
-        // I'll assume the updated script uses: /tmp/openwispr_recording.wav (OUTPUT_FILE)
-        
-        try {
-            const proc = new Gio.Subprocess({
-                argv: [
-                    WHISPER_BINARY,
-                    '-m', this._modelPath,
-                    '-f', OUTPUT_FILE,
-                    '-otxt',
-                    '-np',
-                    '-nt'
-                ],
-                flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE
-            });
-            
-            proc.init(null);
-            
-            proc.communicate_utf8_async(null, null, (proc, res) => {
-                try {
-                    const [, stdout, stderr] = proc.communicate_utf8_finish(res);
-                    
-                    if (!proc.get_successful()) {
-                        console.error(`[openwispr-gnome-extension] Transcription failed: ${stderr}`);
-                        this._notifyError('Transcription failed.');
-                        this._resetState();
-                        return;
+    _processRecordingPipeline() {
+        this._trimSilence(OUTPUT_FILE, (processedPath) => {
+            this._transcribeAudio(processedPath, (transcript) => {
+                if (transcript === null) {
+                    this._resetState();
+                    return;
+                }
+
+                this._cleanupTranscript(transcript, (cleanedText) => {
+                    const finalText = (cleanedText ?? transcript ?? '').trim();
+                    console.log(`[openwispr-gnome-extension] Text: ${finalText}`);
+
+                    if (finalText) {
+                        this._notify(`Transcribed: ${finalText}`);
+                        this._injectText(finalText);
+                    } else {
+                        this._notify('No speech detected.');
                     }
 
-                    // Success! 
-                    // whisper-cli with -otxt creates <file>.txt. 
-                    // But we can also just capture stdout if we remove -otxt?
-                    // Let's try to just read the file for reliability.
-                    const txtPath = OUTPUT_FILE + '.txt'; 
-                    const file = Gio.File.new_for_path(txtPath);
-                    
-                    file.load_contents_async(null, (file, res) => {
-                        try {
-                            const [, contents] = file.load_contents_finish(res);
-                            const text = new TextDecoder().decode(contents).trim();
-                            console.log(`[openwispr-gnome-extension] Text: ${text}`);
-                            
-                            if (text) {
-                                this._notify(`Transcribed: ${text}`);
-                                this._injectText(text);
-                            } else {
-                                this._notify('No speech detected.');
-                            }
-                        } catch (e) {
-                            console.error(`[openwispr-gnome-extension] Failed to read output: ${e}`);
-                        }
-                        this._resetState();
-                    });
-
-                } catch (e) {
-                    console.error(`[openwispr-gnome-extension] Transcribe error: ${e}`);
                     this._resetState();
+                });
+            });
+        });
+    }
+
+    _trimSilence(inputPath, callback) {
+        if (!this._settings.get_boolean('silence-trim-enabled')) {
+            callback(inputPath);
+            return;
+        }
+
+        if (!GLib.file_test(FFMPEG_BINARY, GLib.FileTest.EXISTS)) {
+            console.warn('[openwispr-gnome-extension] ffmpeg not found; skipping silence trim.');
+            callback(inputPath);
+            return;
+        }
+
+        const threshold = this._settings.get_string('silence-threshold') || '-35dB';
+        const duration = Math.max(0.05, this._settings.get_double('silence-duration'));
+        const filter = `silenceremove=start_periods=1:start_duration=${duration}:start_threshold=${threshold}:stop_periods=-1:stop_duration=${duration}:stop_threshold=${threshold}`;
+
+        this._runSubprocess(
+            [
+                FFMPEG_BINARY,
+                '-y',
+                '-hide_banner',
+                '-loglevel',
+                'error',
+                '-i',
+                inputPath,
+                '-af',
+                filter,
+                TRIMMED_OUTPUT_FILE,
+            ],
+            (ok, _stdout, stderr) => {
+                if (!ok) {
+                    console.warn(`[openwispr-gnome-extension] ffmpeg trim failed; using original audio. ${stderr}`);
+                    callback(inputPath);
+                    return;
+                }
+
+                try {
+                    const trimmedFile = Gio.File.new_for_path(TRIMMED_OUTPUT_FILE);
+                    const info = trimmedFile.query_info('standard::size', Gio.FileQueryInfoFlags.NONE, null);
+                    if (info.get_size() > 0) {
+                        callback(TRIMMED_OUTPUT_FILE);
+                        return;
+                    }
+                } catch (e) {
+                    console.warn(`[openwispr-gnome-extension] Could not inspect trimmed audio file: ${e}`);
+                }
+
+                callback(inputPath);
+            }
+        );
+    }
+
+    _transcribeAudio(inputPath, callback) {
+        const provider = this._normalizeProvider(this._settings.get_string('stt-provider'));
+
+        if (provider === 'openai' || provider === 'groq') {
+            this._transcribeRemote(inputPath, provider, callback);
+            return;
+        }
+
+        this._transcribeLocal(inputPath, callback);
+    }
+
+    _transcribeLocal(inputPath, callback) {
+        console.log('[openwispr-gnome-extension] Transcribing with local whisper-cli...');
+
+        this._runSubprocess(
+            [
+                WHISPER_BINARY,
+                '-m',
+                this._modelPath,
+                '-f',
+                inputPath,
+                '-otxt',
+                '-np',
+                '-nt',
+            ],
+            (ok, _stdout, stderr) => {
+                if (!ok) {
+                    console.error(`[openwispr-gnome-extension] Local transcription failed: ${stderr}`);
+                    this._notifyError('Local transcription failed.');
+                    callback(null);
+                    return;
+                }
+
+                const txtPath = `${inputPath}.txt`;
+                const file = Gio.File.new_for_path(txtPath);
+
+                file.load_contents_async(null, (loadedFile, res) => {
+                    try {
+                        const [, contents] = loadedFile.load_contents_finish(res);
+                        const text = new TextDecoder().decode(contents).trim();
+                        callback(text);
+                    } catch (e) {
+                        console.error(`[openwispr-gnome-extension] Failed to read local output: ${e}`);
+                        callback(null);
+                    }
+                });
+            }
+        );
+    }
+
+    _transcribeRemote(inputPath, provider, callback) {
+        if (!GLib.file_test(CURL_BINARY, GLib.FileTest.EXISTS)) {
+            this._notifyError('curl is required for remote speech-to-text.');
+            callback(null);
+            return;
+        }
+
+        const isOpenAI = provider === 'openai';
+        const endpoint = this._settings.get_string(isOpenAI ? 'stt-openai-endpoint' : 'stt-groq-endpoint');
+        const model = this._settings.get_string(isOpenAI ? 'stt-openai-model' : 'stt-groq-model');
+        const apiKey = this._settings.get_string(isOpenAI ? 'stt-openai-api-key' : 'stt-groq-api-key');
+
+        if (!apiKey) {
+            this._notifyError(`Missing API key for ${provider} speech-to-text.`);
+            callback(null);
+            return;
+        }
+
+        console.log(`[openwispr-gnome-extension] Transcribing with ${provider} endpoint...`);
+        this._runSubprocess(
+            [
+                CURL_BINARY,
+                '-sS',
+                '-X',
+                'POST',
+                endpoint,
+                '-H',
+                `Authorization: Bearer ${apiKey}`,
+                '-F',
+                `model=${model}`,
+                '-F',
+                `file=@${inputPath}`,
+            ],
+            (ok, stdout, stderr) => {
+                if (!ok) {
+                    console.error(`[openwispr-gnome-extension] Remote transcription request failed: ${stderr}`);
+                    this._notifyError('Remote transcription request failed.');
+                    callback(null);
+                    return;
+                }
+
+                const text = this._extractRemoteTranscription(stdout);
+                if (!text) {
+                    console.error(`[openwispr-gnome-extension] Remote transcription response parse failed: ${stdout}`);
+                    this._notifyError('Remote transcription response was invalid.');
+                    callback(null);
+                    return;
+                }
+
+                callback(text);
+            }
+        );
+    }
+
+    _extractRemoteTranscription(stdout) {
+        try {
+            const payload = JSON.parse(stdout);
+
+            if (typeof payload.text === 'string')
+                return payload.text.trim();
+
+            if (typeof payload.transcript === 'string')
+                return payload.transcript.trim();
+
+            if (payload.result && typeof payload.result.text === 'string')
+                return payload.result.text.trim();
+        } catch (e) {
+            console.error(`[openwispr-gnome-extension] Failed to parse remote transcription JSON: ${e}`);
+        }
+
+        return '';
+    }
+
+    _cleanupTranscript(text, callback) {
+        if (!this._settings.get_boolean('llm-filter-enabled')) {
+            callback(text);
+            return;
+        }
+
+        if (!GLib.file_test(CURL_BINARY, GLib.FileTest.EXISTS)) {
+            this._notifyError('curl is required for LLM cleanup.');
+            callback(text);
+            return;
+        }
+
+        const provider = this._normalizeProvider(this._settings.get_string('llm-provider'));
+        const isOpenAI = provider === 'openai';
+        const endpoint = this._settings.get_string(isOpenAI ? 'llm-openai-endpoint' : 'llm-groq-endpoint');
+        const model = this._settings.get_string(isOpenAI ? 'llm-openai-model' : 'llm-groq-model');
+        const apiKey = this._settings.get_string(isOpenAI ? 'llm-openai-api-key' : 'llm-groq-api-key');
+        const prompt = this._settings.get_string('llm-cleanup-prompt');
+
+        if (!apiKey) {
+            this._notifyError(`Missing API key for ${provider} LLM cleanup.`);
+            callback(text);
+            return;
+        }
+
+        const payload = {
+            model,
+            temperature: 0,
+            messages: [
+                { role: 'system', content: prompt },
+                { role: 'user', content: text },
+            ],
+        };
+
+        this._runSubprocess(
+            [
+                CURL_BINARY,
+                '-sS',
+                '-X',
+                'POST',
+                endpoint,
+                '-H',
+                'Content-Type: application/json',
+                '-H',
+                `Authorization: Bearer ${apiKey}`,
+                '-d',
+                JSON.stringify(payload),
+            ],
+            (ok, stdout, stderr) => {
+                if (!ok) {
+                    console.error(`[openwispr-gnome-extension] LLM cleanup request failed: ${stderr}`);
+                    callback(text);
+                    return;
+                }
+
+                const cleaned = this._extractLlmText(stdout);
+                callback(cleaned || text);
+            }
+        );
+    }
+
+    _extractLlmText(stdout) {
+        try {
+            const payload = JSON.parse(stdout);
+
+            if (typeof payload.output_text === 'string')
+                return payload.output_text.trim();
+
+            const choice = payload.choices?.[0];
+            const message = choice?.message?.content;
+
+            if (typeof message === 'string')
+                return message.trim();
+
+            if (Array.isArray(message)) {
+                return message
+                    .map(part => (typeof part?.text === 'string' ? part.text : ''))
+                    .join('')
+                    .trim();
+            }
+        } catch (e) {
+            console.error(`[openwispr-gnome-extension] Failed to parse LLM response JSON: ${e}`);
+        }
+
+        return '';
+    }
+
+    _runSubprocess(argv, callback) {
+        try {
+            const proc = new Gio.Subprocess({
+                argv,
+                flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE,
+            });
+            proc.init(null);
+
+            proc.communicate_utf8_async(null, null, (subproc, res) => {
+                try {
+                    const [, stdout, stderr] = subproc.communicate_utf8_finish(res);
+                    callback(subproc.get_successful(), stdout, stderr);
+                } catch (e) {
+                    callback(false, '', `${e}`);
                 }
             });
-            
         } catch (e) {
-            console.error(`[openwispr-gnome-extension] Failed to launch whisper: ${e}`);
-            this._resetState();
+            callback(false, '', `${e}`);
         }
+    }
+
+    _normalizeProvider(provider) {
+        if (provider === 'grok')
+            return 'groq';
+
+        return provider;
+    }
+
+    _migrateLegacyProviderNames() {
+        const sttProvider = this._settings.get_string('stt-provider');
+        if (sttProvider === 'grok')
+            this._settings.set_string('stt-provider', 'groq');
+
+        const llmProvider = this._settings.get_string('llm-provider');
+        if (llmProvider === 'grok')
+            this._settings.set_string('llm-provider', 'groq');
     }
 
     _injectText(text) {

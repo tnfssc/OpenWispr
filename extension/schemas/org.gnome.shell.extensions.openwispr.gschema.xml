@@ -21,6 +21,82 @@
       <default>true</default>
       <summary>Show extension notifications</summary>
     </key>
+    <key name="silence-trim-enabled" type="b">
+      <default>true</default>
+      <summary>Trim silence from recorded audio with ffmpeg</summary>
+    </key>
+    <key name="silence-threshold" type="s">
+      <default>'-35dB'</default>
+      <summary>Silence threshold used by ffmpeg silenceremove</summary>
+    </key>
+    <key name="silence-duration" type="d">
+      <default>0.25</default>
+      <summary>Minimum silence duration for trimming</summary>
+    </key>
+    <key name="stt-provider" type="s">
+      <default>'local'</default>
+      <summary>Speech-to-text provider</summary>
+    </key>
+    <key name="stt-openai-endpoint" type="s">
+      <default>'https://api.openai.com/v1/audio/transcriptions'</default>
+      <summary>OpenAI Whisper endpoint URL</summary>
+    </key>
+    <key name="stt-openai-model" type="s">
+      <default>'whisper-1'</default>
+      <summary>OpenAI Whisper model</summary>
+    </key>
+    <key name="stt-openai-api-key" type="s">
+      <default>''</default>
+      <summary>OpenAI API key for speech-to-text</summary>
+    </key>
+    <key name="stt-groq-endpoint" type="s">
+      <default>'https://api.groq.com/openai/v1/audio/transcriptions'</default>
+      <summary>Groq speech-to-text endpoint URL</summary>
+    </key>
+    <key name="stt-groq-model" type="s">
+      <default>'whisper-large-v3-turbo'</default>
+      <summary>Groq speech-to-text model</summary>
+    </key>
+    <key name="stt-groq-api-key" type="s">
+      <default>''</default>
+      <summary>Groq API key for speech-to-text</summary>
+    </key>
+    <key name="llm-filter-enabled" type="b">
+      <default>false</default>
+      <summary>Enable LLM cleanup of transcripts</summary>
+    </key>
+    <key name="llm-provider" type="s">
+      <default>'openai'</default>
+      <summary>LLM provider for transcript cleanup</summary>
+    </key>
+    <key name="llm-openai-endpoint" type="s">
+      <default>'https://api.openai.com/v1/chat/completions'</default>
+      <summary>OpenAI chat completion endpoint URL</summary>
+    </key>
+    <key name="llm-openai-model" type="s">
+      <default>'gpt-4o-mini'</default>
+      <summary>OpenAI model for transcript cleanup</summary>
+    </key>
+    <key name="llm-openai-api-key" type="s">
+      <default>''</default>
+      <summary>OpenAI API key for transcript cleanup</summary>
+    </key>
+    <key name="llm-groq-endpoint" type="s">
+      <default>'https://api.groq.com/openai/v1/chat/completions'</default>
+      <summary>Groq chat completion endpoint URL</summary>
+    </key>
+    <key name="llm-groq-model" type="s">
+      <default>'llama-3.1-8b-instant'</default>
+      <summary>Groq model for transcript cleanup</summary>
+    </key>
+    <key name="llm-groq-api-key" type="s">
+      <default>''</default>
+      <summary>Groq API key for transcript cleanup</summary>
+    </key>
+    <key name="llm-cleanup-prompt" type="s">
+      <default>'Clean up this speech-to-text transcript. Fix casing and punctuation, remove filler words, keep meaning unchanged, and return only the cleaned text.'</default>
+      <summary>Prompt used for LLM transcript cleanup</summary>
+    </key>
     <key name="toggle-recording" type="as">
       <default><![CDATA[['<Control><Alt>r']]]></default>
       <summary>Toggle recording</summary>

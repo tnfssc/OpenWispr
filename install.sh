@@ -31,5 +31,17 @@ echo "Dependencies check:"
 if which whisper-cli >/dev/null; then
     echo "  [OK] whisper-cli found at $(which whisper-cli)"
 else
-    echo "  [ERR] whisper-cli NOT found in PATH. Please install it or symlink it to /usr/bin/whisper-cli"
+    echo "  [WARN] whisper-cli NOT found in PATH. Local STT will fail unless you use remote endpoints."
+fi
+
+if which ffmpeg >/dev/null; then
+    echo "  [OK] ffmpeg found at $(which ffmpeg)"
+else
+    echo "  [WARN] ffmpeg NOT found in PATH. Silence trimming will be skipped."
+fi
+
+if which curl >/dev/null; then
+    echo "  [OK] curl found at $(which curl)"
+else
+    echo "  [WARN] curl NOT found in PATH. Remote STT and LLM cleanup will fail."
 fi

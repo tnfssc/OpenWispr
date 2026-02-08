@@ -27,6 +27,29 @@ if (!schemaId) {
 
 print(`Found settings-schema: ${schemaId}`);
 
+function fail(message) {
+    print(`FAIL: ${message}`);
+    imports.system.exit(1);
+}
+
+function assertEqual(actual, expected, label) {
+    if (actual !== expected)
+        fail(`${label} expected '${expected}', got '${actual}'`);
+
+    print(`PASS: ${label} = ${actual}`);
+}
+
+function assertTrue(condition, label) {
+    if (!condition)
+        fail(label);
+
+    print(`PASS: ${label}`);
+}
+
+function defaultValue(schemaObj, key) {
+    return schemaObj.get_key(key).get_default_value().deep_unpack();
+}
+
 // Now try to load it. 
 // We need to tell Gio where the schema is.
 const schemaDir = Gio.File.new_for_path('./extension/schemas');
@@ -38,27 +61,54 @@ const schemaSource = Gio.SettingsSchemaSource.new_from_directory(
 
 const schema = schemaSource.lookup(schemaId, true);
 if (!schema) {
-    print(`FAIL: Schema '${schemaId}' not found in ./extension/schemas`);
-    imports.system.exit(1);
+    fail(`Schema '${schemaId}' not found in ./extension/schemas`);
 }
 
 print("Schema found successfully.");
 
 try {
-    // Note: To actually instantiate Gio.Settings with a custom source is a bit different
-    // than the standard constructor.
-    // But verifying the schema exists in the compiled source is usually enough proof 
-    // that Settings will work if initialized correctly.
-    
-    // Let's try to instantiate it using the schema object we found.
     const settings = new Gio.Settings({ settings_schema: schema });
     print("PASS: Successfully initialized Gio.Settings with the schema.");
-    
-    // Verify a key
-    const defaultVal = settings.get_value('toggle-recording');
-    print(`Default value for 'toggle-recording': ${defaultVal.deep_unpack()}`);
+
+    const toggleShortcut = defaultValue(schema, 'toggle-recording');
+    assertTrue(toggleShortcut.length > 0, "'toggle-recording' has a default shortcut");
+    assertEqual(toggleShortcut[0], '<Control><Alt>r', "'toggle-recording' default");
+
+    assertEqual(defaultValue(schema, 'hold-to-speak-enabled'), true, "'hold-to-speak-enabled' default");
+    assertEqual(defaultValue(schema, 'hold-to-speak-trigger'), 'ctrl-alt-space', "'hold-to-speak-trigger' default");
+    assertEqual(defaultValue(schema, 'hold-to-speak-keybinding')[0], '<Control><Alt>space', "'hold-to-speak-keybinding' default");
+
+    assertEqual(defaultValue(schema, 'auto-paste-enabled'), true, "'auto-paste-enabled' default");
+    assertEqual(defaultValue(schema, 'notifications-enabled'), true, "'notifications-enabled' default");
+
+    assertEqual(defaultValue(schema, 'silence-trim-enabled'), true, "'silence-trim-enabled' default");
+    assertEqual(defaultValue(schema, 'silence-threshold'), '-35dB', "'silence-threshold' default");
+    assertEqual(defaultValue(schema, 'silence-duration'), 0.25, "'silence-duration' default");
+
+    assertEqual(defaultValue(schema, 'stt-provider'), 'local', "'stt-provider' default");
+    assertEqual(defaultValue(schema, 'stt-openai-endpoint'), 'https://api.openai.com/v1/audio/transcriptions', "'stt-openai-endpoint' default");
+    assertEqual(defaultValue(schema, 'stt-openai-model'), 'whisper-1', "'stt-openai-model' default");
+    assertEqual(defaultValue(schema, 'stt-openai-api-key'), '', "'stt-openai-api-key' default");
+    assertEqual(defaultValue(schema, 'stt-groq-endpoint'), 'https://api.groq.com/openai/v1/audio/transcriptions', "'stt-groq-endpoint' default");
+    assertEqual(defaultValue(schema, 'stt-groq-model'), 'whisper-large-v3-turbo', "'stt-groq-model' default");
+    assertEqual(defaultValue(schema, 'stt-groq-api-key'), '', "'stt-groq-api-key' default");
+
+    assertEqual(defaultValue(schema, 'llm-filter-enabled'), false, "'llm-filter-enabled' default");
+    assertEqual(defaultValue(schema, 'llm-provider'), 'openai', "'llm-provider' default");
+    assertEqual(defaultValue(schema, 'llm-openai-endpoint'), 'https://api.openai.com/v1/chat/completions', "'llm-openai-endpoint' default");
+    assertEqual(defaultValue(schema, 'llm-openai-model'), 'gpt-4o-mini', "'llm-openai-model' default");
+    assertEqual(defaultValue(schema, 'llm-openai-api-key'), '', "'llm-openai-api-key' default");
+    assertEqual(defaultValue(schema, 'llm-groq-endpoint'), 'https://api.groq.com/openai/v1/chat/completions', "'llm-groq-endpoint' default");
+    assertEqual(defaultValue(schema, 'llm-groq-model'), 'llama-3.1-8b-instant', "'llm-groq-model' default");
+    assertEqual(defaultValue(schema, 'llm-groq-api-key'), '', "'llm-groq-api-key' default");
+
+    const prompt = defaultValue(schema, 'llm-cleanup-prompt');
+    assertTrue(prompt.length > 20, "'llm-cleanup-prompt' default is non-empty");
+
+    assertTrue(settings.list_keys().length >= 20, 'settings object exposes expected key count');
+
+    print('PASS: All required settings keys validated.');
     
 } catch (e) {
-    print(`FAIL: Could not initialize settings: ${e.message}`);
-    imports.system.exit(1);
+    fail(`Could not initialize settings: ${e.message}`);
 }
