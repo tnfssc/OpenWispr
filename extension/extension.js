@@ -17,7 +17,14 @@ export default class OpenWisprExtension extends Extension {
     enable() {
         this._settings = this.getSettings();
         this._recording = false;
+        this._processing = false;
+        this._recordingTrigger = null;
         this._recordProc = null;
+        this._holdKeyPressed = false;
+        this._holdStartCooldownUntilUs = 0;
+        this._holdToSpeakEnabled = this._settings.get_boolean('hold-to-speak-enabled');
+        this._holdToSpeakTrigger = this._settings.get_string('hold-to-speak-trigger');
+        this._autoPasteEnabled = this._settings.get_boolean('auto-paste-enabled');
 
         // resolve paths relative to extension dir
         this._modelPath = this.dir.get_child('models').get_child('ggml-base.en.bin').get_path();
@@ -48,16 +55,62 @@ export default class OpenWisprExtension extends Extension {
             () => this._toggleRecording()
         );
 
+        this._capturedEventId = global.stage.connect(
+            'captured-event',
+            this._onCapturedEvent.bind(this)
+        );
+
+        this._holdToSpeakChangedId = this._settings.connect('changed::hold-to-speak-enabled', () => {
+            this._holdToSpeakEnabled = this._settings.get_boolean('hold-to-speak-enabled');
+
+            if (!this._holdToSpeakEnabled) {
+                this._holdKeyPressed = false;
+
+                if (this._recording && this._recordingTrigger === 'hold')
+                    this._stopRecording(true);
+            }
+        });
+
+        this._holdToSpeakTriggerChangedId = this._settings.connect('changed::hold-to-speak-trigger', () => {
+            this._holdToSpeakTrigger = this._settings.get_string('hold-to-speak-trigger');
+        });
+
+        this._autoPasteChangedId = this._settings.connect('changed::auto-paste-enabled', () => {
+            this._autoPasteEnabled = this._settings.get_boolean('auto-paste-enabled');
+        });
+
         console.log(`[openwispr-gnome-extension] Enabled. Model: ${this._modelPath}`);
     }
 
     disable() {
         this._stopRecording(false); // Force stop without transcription if disabling
+
+        if (this._capturedEventId) {
+            global.stage.disconnect(this._capturedEventId);
+            this._capturedEventId = null;
+        }
+
+        if (this._settings && this._holdToSpeakChangedId) {
+            this._settings.disconnect(this._holdToSpeakChangedId);
+            this._holdToSpeakChangedId = null;
+        }
+
+        if (this._settings && this._holdToSpeakTriggerChangedId) {
+            this._settings.disconnect(this._holdToSpeakTriggerChangedId);
+            this._holdToSpeakTriggerChangedId = null;
+        }
+
+        if (this._settings && this._autoPasteChangedId) {
+            this._settings.disconnect(this._autoPasteChangedId);
+            this._autoPasteChangedId = null;
+        }
         
         if (this._indicator) {
             this._indicator.destroy();
             this._indicator = null;
         }
+
+        this._icon = null;
 
         Main.wm.removeKeybinding('toggle-recording');
         this._settings = null;
@@ -67,15 +120,99 @@ export default class OpenWisprExtension extends Extension {
         if (this._recording) {
             this._stopRecording(true);
         } else {
-            this._startRecording();
+            this._startRecording('toggle');
         }
     }
 
-    _startRecording() {
-        if (this._recording) return;
+    _onCapturedEvent(_actor, event) {
+        if (!this._holdToSpeakEnabled)
+            return Clutter.EVENT_PROPAGATE;
 
-        console.log('[openwispr-gnome-extension] Starting recording...');
+        const eventType = event.type();
+        if (eventType !== Clutter.EventType.KEY_PRESS && eventType !== Clutter.EventType.KEY_RELEASE)
+            return Clutter.EVENT_PROPAGATE;
+
+        const keySymbol = event.get_key_symbol();
+        const modifiers = event.get_state();
+        const nowUs = GLib.get_monotonic_time();
+
+        if (eventType === Clutter.EventType.KEY_PRESS) {
+            if (this._recording || this._processing)
+                return Clutter.EVENT_PROPAGATE;
+
+            if (nowUs < this._holdStartCooldownUntilUs)
+                return Clutter.EVENT_PROPAGATE;
+
+            if (!this._holdKeyPressed && this._isHoldToSpeakPressEvent(keySymbol, modifiers)) {
+                this._holdKeyPressed = true;
+                this._startRecording('hold');
+            }
+        } else if (eventType === Clutter.EventType.KEY_RELEASE) {
+            if (this._isHoldToSpeakReleaseEvent(keySymbol)) {
+                this._holdKeyPressed = false;
+
+                if (this._recording && this._recordingTrigger === 'hold')
+                    this._stopRecording(true);
+            }
+
+            if (!this._recording)
+                return Clutter.EVENT_PROPAGATE;
+        }
+
+        return Clutter.EVENT_PROPAGATE;
+    }
+
+    _isHoldToSpeakChordPress(keySymbol, modifiers) {
+        const isSlashKey = keySymbol === Clutter.KEY_slash || keySymbol === Clutter.KEY_KP_Divide;
+        const hasControlModifier = Boolean(modifiers & Clutter.ModifierType.CONTROL_MASK);
+
+        return isSlashKey && hasControlModifier;
+    }
+
+    _isHoldToSpeakCtrlSpacePress(keySymbol, modifiers) {
+        return keySymbol === Clutter.KEY_space && Boolean(modifiers & Clutter.ModifierType.CONTROL_MASK);
+    }
+
+    _isHoldToSpeakPressEvent(keySymbol, modifiers) {
+        if (this._holdToSpeakTrigger === 'right-ctrl')
+            return keySymbol === Clutter.KEY_Control_R;
+
+        if (this._holdToSpeakTrigger === 'f8')
+            return keySymbol === Clutter.KEY_F8;
+
+        if (this._holdToSpeakTrigger === 'f9')
+            return keySymbol === Clutter.KEY_F9;
+
+        if (this._holdToSpeakTrigger === 'ctrl-space')
+            return this._isHoldToSpeakCtrlSpacePress(keySymbol, modifiers);
+
+        return this._isHoldToSpeakChordPress(keySymbol, modifiers);
+    }
+
+    _isHoldToSpeakReleaseEvent(keySymbol) {
+        if (this._holdToSpeakTrigger === 'right-ctrl')
+            return keySymbol === Clutter.KEY_Control_R;
+
+        if (this._holdToSpeakTrigger === 'f8')
+            return keySymbol === Clutter.KEY_F8;
+
+        if (this._holdToSpeakTrigger === 'f9')
+            return keySymbol === Clutter.KEY_F9;
+
+        if (this._holdToSpeakTrigger === 'ctrl-space')
+            return keySymbol === Clutter.KEY_space || keySymbol === Clutter.KEY_Control_L || keySymbol === Clutter.KEY_Control_R;
+
+        return keySymbol === Clutter.KEY_slash || keySymbol === Clutter.KEY_KP_Divide ||
+            keySymbol === Clutter.KEY_Control_L || keySymbol === Clutter.KEY_Control_R;
+    }
+
+    _startRecording(trigger = 'toggle') {
+        if (this._recording || this._processing)
+            return;
+
+        console.log(`[openwispr-gnome-extension] Starting recording (${trigger})...`);
         this._recording = true;
+        this._recordingTrigger = trigger;
         this._icon.icon_name = 'media-record-symbolic';
         this._icon.style_class = 'system-status-icon destructive-action'; // Red-ish if theme supports
 
@@ -110,8 +247,12 @@ export default class OpenWisprExtension extends Extension {
     _stopRecording(transcribe = true) {
         if (!this._recording) return;
 
-        console.log('[openwispr-gnome-extension] Stopping recording...');
+        console.log(`[openwispr-gnome-extension] Stopping recording (${this._recordingTrigger ?? 'unknown'})...`);
+        if (this._recordingTrigger === 'hold')
+            this._holdStartCooldownUntilUs = GLib.get_monotonic_time() + 750000;
+
         this._recording = false;
+        this._processing = true;
         this._icon.icon_name = 'process-working-symbolic'; // Spinner
         
         if (this._recordProc) {
@@ -213,25 +354,17 @@ export default class OpenWisprExtension extends Extension {
     _injectText(text) {
         // Clutter Virtual Input
         try {
-            const seat = Clutter.get_default_backend().get_default_seat();
-            const virtualDevice = seat.create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
-            
-            const now = () => GLib.get_monotonic_time() / 1000;
-            
-            for (const char of text) {
-                // This is a simplification. Clutter.KEY_* are needed.
-                // Converting arbitrary string to keycodes is hard without a map.
-                // Hack: Copy to clipboard and Paste?
-                // Or use GLib.unichar_to_utf8() ? No that's char to bytes.
-                // Clutter virtual device needs KEYVALS.
-                // 
-                // For a robust "Superwhisper" experience, "Paste" is often safest for blocks of text.
-                // Let's try Clipboard + Ctrl-V.
-            }
-
-            // Strategy: Clipboard + Paste
             const clipboard = St.Clipboard.get_default();
             clipboard.set_text(St.ClipboardType.CLIPBOARD, text);
+
+            if (!this._autoPasteEnabled) {
+                Main.notify('openwispr-gnome-extension', 'Transcription copied to clipboard.');
+                return;
+            }
+
+            const seat = Clutter.get_default_backend().get_default_seat();
+            const virtualDevice = seat.create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
+            const now = () => GLib.get_monotonic_time() / 1000;
             
             let time = now();
             
@@ -255,6 +388,8 @@ export default class OpenWisprExtension extends Extension {
 
     _resetState() {
         this._recording = false;
+        this._processing = false;
+        this._recordingTrigger = null;
         this._recordProc = null;
         if (this._icon) {
             this._icon.icon_name = 'microphone-sensitivity-high-symbolic';
