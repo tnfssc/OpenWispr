@@ -6,7 +6,7 @@
 
 - **Local or Remote Processing**: Use local `whisper-cli` or remote STT endpoints (OpenAI/Groq), configurable per setup.
 - **Optional Keyboard Shortcuts**: Configure your own shortcut for toggle recording in preferences.
-- **Hold to Speak**: Optional mode to hold `Ctrl+Alt+Space` to record and release to transcribe.
+- **Hold to Speak**: Optional mode to hold `Ctrl+Alt+T` to record and release to transcribe.
 - **Silence Cutting**: Uses `ffmpeg` to cut silent parts before transcription.
 - **Configurable STT Backends**: Choose local `whisper-cli`, OpenAI Whisper endpoint, or Groq endpoint.
 - **LLM Transcript Cleanup**: Optionally post-process transcript text with OpenAI or Groq models.
@@ -62,7 +62,7 @@ Before installing, ensure you have the following dependencies:
 
 1.  **Start Dictation**: Click the microphone icon in the top bar, or set a custom keyboard shortcut in preferences.
     *   The icon will change to a recording indicator.
-    *   You can also hold `Ctrl+Alt+Space`.
+    *   You can also hold `Ctrl+Alt+T`.
 2.  **Speak**: Dictate your text clearly.
 3.  **Stop & Transcribe**: Press `Ctrl+Alt+R` again to stop.
     *   If using hold-to-speak, just release the hold key/chord.
@@ -73,13 +73,17 @@ Before installing, ensure you have the following dependencies:
 
 ## Configuration
 
-The extension does not ship with a default keyboard shortcut. You can configure one in preferences, with `dconf-editor`, or by modifying the schema:
+The extension ships with a default toggle shortcut. You can change it in preferences, with `dconf-editor`, or by modifying the schema:
 *   **Schema**: `org.gnome.shell.extensions.openwispr`
 *   **Key**: `toggle-recording`
 
 Hold-to-speak can be enabled/disabled in extension preferences or via:
 *   **Schema**: `org.gnome.shell.extensions.openwispr`
 *   **Key**: `hold-to-speak-enabled`
+
+Hold-to-speak shortcut can be configured in extension preferences or via:
+*   **Schema**: `org.gnome.shell.extensions.openwispr`
+*   **Key**: `hold-to-speak-keybinding`
 
 Auto-paste behavior can be toggled in extension preferences or via:
 *   **Schema**: `org.gnome.shell.extensions.openwispr`

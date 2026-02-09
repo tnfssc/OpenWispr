@@ -15,11 +15,22 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
 
         const holdToSpeakRow = new Adw.SwitchRow({
             title: _('Hold to Speak'),
-            subtitle: _('Hold Ctrl+Alt+Space to record. Release to transcribe.'),
+            subtitle: _('Hold your configured shortcut to record. Release to transcribe.'),
             active: settings.get_boolean('hold-to-speak-enabled'),
         });
         holdToSpeakRow.connect('notify::active', () => settings.set_boolean('hold-to-speak-enabled', holdToSpeakRow.active));
         shortcutsGroup.add(holdToSpeakRow);
+
+        const currentHoldShortcut = settings.get_strv('hold-to-speak-keybinding')[0] || '';
+        const holdShortcutRow = new Adw.EntryRow({
+            title: _('Hold To Speak Shortcut'),
+            text: currentHoldShortcut,
+        });
+        holdShortcutRow.connect('apply', () => {
+            if (holdShortcutRow.text)
+                settings.set_strv('hold-to-speak-keybinding', [holdShortcutRow.text]);
+        });
+        shortcutsGroup.add(holdShortcutRow);
 
         const autoPasteRow = new Adw.SwitchRow({
             title: _('Auto Paste Transcription'),

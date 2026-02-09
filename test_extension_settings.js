@@ -75,8 +75,8 @@ try {
     assertEqual(toggleShortcut[0], '<Control><Alt>r', "'toggle-recording' default");
 
     assertEqual(defaultValue(schema, 'hold-to-speak-enabled'), true, "'hold-to-speak-enabled' default");
-    assertEqual(defaultValue(schema, 'hold-to-speak-trigger'), 'ctrl-alt-space', "'hold-to-speak-trigger' default");
-    assertEqual(defaultValue(schema, 'hold-to-speak-keybinding')[0], '<Control><Alt>space', "'hold-to-speak-keybinding' default");
+    assertEqual(defaultValue(schema, 'hold-to-speak-trigger'), 'ctrl-alt-t', "'hold-to-speak-trigger' default");
+    assertEqual(defaultValue(schema, 'hold-to-speak-keybinding')[0], '<Control><Alt>t', "'hold-to-speak-keybinding' default");
 
     assertEqual(defaultValue(schema, 'auto-paste-enabled'), true, "'auto-paste-enabled' default");
     assertEqual(defaultValue(schema, 'notifications-enabled'), true, "'notifications-enabled' default");

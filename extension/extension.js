@@ -28,6 +28,9 @@ export default class OpenWisprExtension extends Extension {
         this._holdKeyPressed = false;
         this._holdStartCooldownUntilUs = 0;
         this._holdToSpeakEnabled = this._settings.get_boolean('hold-to-speak-enabled');
+        this._holdToSpeakBinding = this._parseAccelerator(
+            this._settings.get_strv('hold-to-speak-keybinding')[0] || '<Control><Alt>t'
+        );
         this._autoPasteEnabled = this._settings.get_boolean('auto-paste-enabled');
         this._notificationsEnabled = this._settings.get_boolean('notifications-enabled');
 
@@ -80,6 +83,12 @@ export default class OpenWisprExtension extends Extension {
             this._autoPasteEnabled = this._settings.get_boolean('auto-paste-enabled');
         });
 
+        this._holdToSpeakBindingChangedId = this._settings.connect('changed::hold-to-speak-keybinding', () => {
+            this._holdToSpeakBinding = this._parseAccelerator(
+                this._settings.get_strv('hold-to-speak-keybinding')[0] || '<Control><Alt>t'
+            );
+        });
+
         this._notificationsChangedId = this._settings.connect('changed::notifications-enabled', () => {
             this._notificationsEnabled = this._settings.get_boolean('notifications-enabled');
         });
@@ -103,6 +112,11 @@ export default class OpenWisprExtension extends Extension {
         if (this._settings && this._autoPasteChangedId) {
             this._settings.disconnect(this._autoPasteChangedId);
             this._autoPasteChangedId = null;
+        }
+
+        if (this._settings && this._holdToSpeakBindingChangedId) {
+            this._settings.disconnect(this._holdToSpeakBindingChangedId);
+            this._holdToSpeakBindingChangedId = null;
         }
 
         if (this._settings && this._notificationsChangedId) {
@@ -168,26 +182,109 @@ export default class OpenWisprExtension extends Extension {
     }
 
     _isHoldToSpeakPressEvent(keySymbol, modifiers) {
-        const hasControlModifier = Boolean(modifiers & Clutter.ModifierType.CONTROL_MASK);
-        const hasAltModifier = Boolean(modifiers & Clutter.ModifierType.MOD1_MASK);
+        if (!this._holdToSpeakBinding.valid)
+            return false;
 
-        return keySymbol === Clutter.KEY_space && hasControlModifier && hasAltModifier;
+        if (!this._holdToSpeakBinding.keyvals.includes(keySymbol))
+            return false;
+
+        return (modifiers & this._holdToSpeakBinding.modifierMask) === this._holdToSpeakBinding.modifierMask;
     }
 
     _isHoldToSpeakReleaseEvent(keySymbol, modifiers) {
-        const releasedHoldKey =
-            keySymbol === Clutter.KEY_space ||
-            keySymbol === Clutter.KEY_Control_L ||
-            keySymbol === Clutter.KEY_Control_R ||
-            keySymbol === Clutter.KEY_Alt_L ||
-            keySymbol === Clutter.KEY_Alt_R ||
-            keySymbol === Clutter.KEY_Meta_L ||
-            keySymbol === Clutter.KEY_Meta_R;
+        if (!this._holdToSpeakBinding.valid)
+            return false;
 
-        const hasControlModifier = Boolean(modifiers & Clutter.ModifierType.CONTROL_MASK);
-        const hasAltModifier = Boolean(modifiers & Clutter.ModifierType.MOD1_MASK);
+        const releasedHoldKey = this._holdToSpeakBinding.keyvals.includes(keySymbol);
+        const modifiersStillHeld =
+            (modifiers & this._holdToSpeakBinding.modifierMask) === this._holdToSpeakBinding.modifierMask;
 
-        return releasedHoldKey || !hasControlModifier || !hasAltModifier;
+        return releasedHoldKey || !modifiersStillHeld;
+    }
+
+    _parseAccelerator(accelerator) {
+        const fallback = {
+            valid: false,
+            keyvals: [],
+            modifierMask: 0,
+            raw: accelerator,
+        };
+
+        if (!accelerator)
+            return fallback;
+
+        let modifierTokens = [];
+        let keyToken = '';
+
+        if (accelerator.includes('<')) {
+            modifierTokens = [...accelerator.matchAll(/<([^>]+)>/g)]
+                .map(match => match[1].trim().toLowerCase());
+            keyToken = accelerator.replace(/<[^>]+>/g, '').trim();
+        } else if (accelerator.includes('+')) {
+            const parts = accelerator
+                .split('+')
+                .map(part => part.trim())
+                .filter(Boolean);
+
+            keyToken = parts.pop() || '';
+            modifierTokens = parts.map(part => part.toLowerCase());
+        } else {
+            keyToken = accelerator.trim();
+        }
+
+        const keyvals = this._resolveKeyvals(keyToken);
+        if (keyvals.length === 0)
+            return fallback;
+
+        let modifierMask = 0;
+        for (const token of modifierTokens) {
+            if (token === 'control' || token === 'ctrl' || token === 'primary') {
+                modifierMask |= Clutter.ModifierType.CONTROL_MASK;
+            } else if (token === 'alt' || token === 'mod1') {
+                modifierMask |= Clutter.ModifierType.MOD1_MASK;
+            } else if (token === 'shift') {
+                modifierMask |= Clutter.ModifierType.SHIFT_MASK;
+            } else if (token === 'super' || token === 'meta' || token === 'mod4') {
+                modifierMask |= Clutter.ModifierType.SUPER_MASK;
+            }
+        }
+
+        return {
+            valid: true,
+            keyvals,
+            modifierMask,
+            raw: accelerator,
+        };
+    }
+
+    _resolveKeyvals(keyToken) {
+        if (!keyToken)
+            return [];
+
+        const key = keyToken.trim();
+        const lower = key.toLowerCase();
+
+        if (lower === 'space')
+            return [Clutter.KEY_space];
+        if (lower === 'slash')
+            return [Clutter.KEY_slash, Clutter.KEY_KP_Divide];
+
+        const collected = [];
+        const maybeAdd = value => {
+            if (typeof value === 'number' && !collected.includes(value))
+                collected.push(value);
+        };
+
+        maybeAdd(Clutter[`KEY_${key}`]);
+        maybeAdd(Clutter[`KEY_${key.toUpperCase()}`]);
+        maybeAdd(Clutter[`KEY_${lower}`]);
+
+        if (lower.length === 1) {
+            maybeAdd(lower.charCodeAt(0));
+            maybeAdd(lower.toUpperCase().charCodeAt(0));
+        }
+
+        return collected;
     }
 
     _startRecording(trigger = 'toggle') {
@@ -574,6 +671,15 @@ export default class OpenWisprExtension extends Extension {
         const llmProvider = this._settings.get_string('llm-provider');
         if (llmProvider === 'grok')
             this._settings.set_string('llm-provider', 'groq');
+
+        const holdBinding = this._settings.get_strv('hold-to-speak-keybinding');
+        const currentHoldBinding = holdBinding[0] || '';
+        if (!currentHoldBinding || currentHoldBinding === '<Control><Alt>space')
+            this._settings.set_strv('hold-to-speak-keybinding', ['<Control><Alt>t']);
+
+        const holdTrigger = this._settings.get_string('hold-to-speak-trigger');
+        if (!holdTrigger || holdTrigger === 'ctrl-alt-space')
+            this._settings.set_string('hold-to-speak-trigger', 'ctrl-alt-t');
     }
 
     _injectText(text) {
