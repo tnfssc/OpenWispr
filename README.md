@@ -1,6 +1,10 @@
 # openwispr-gnome-extension
 
+[![Gnome Extensions](https://img.shields.io/badge/Install-Now-4a86cf?style=for-the-badge&logo=gnome)](https://extensions.gnome.org/extension/9314/openwispr-gnome-extension/)
+
 **openwispr-gnome-extension** is an AI-powered voice-to-text dictation extension for GNOME Shell. It leverages local AI models (via `whisper-cli`) to provide private, fast, and accurate speech recognition directly into any application.
+
+<img width="429" height="255" alt="screenshot" src="https://github.com/user-attachments/assets/6a1856a2-228f-434a-8319-5386ec1b4cf0" />
 
 ## Features
 
