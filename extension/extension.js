@@ -49,6 +49,7 @@ export default class OpenWisprExtension extends Extension {
         this._recording = false;
         this._processing = false;
         this._recordingTrigger = null;
+        this._remoteHoldBinding = null;
         this._recordProc = null;
         this._holdKeyPressed = false;
         this._holdStartCooldownUntilUs = 0;
@@ -233,6 +234,7 @@ export default class OpenWisprExtension extends Extension {
         if (this._recording || this._processing)
             return false;
 
+        this._remoteHoldBinding = this._parseRemotePortalBinding(triggerSource);
         this._debug(`DBus start requested by ${triggerSource}`);
         this._startRecording(`remote:${triggerSource}`);
         return this._recording;
@@ -296,6 +298,11 @@ export default class OpenWisprExtension extends Extension {
                     this._stopRecording(true);
             }
 
+            if (this._recording && this._isRemotePortalReleaseEvent(keySymbol, modifiers)) {
+                this._debug('Remote portal release detected from keyboard event');
+                this._stopRecording(true);
+            }
+
             if (!this._recording)
                 return Clutter.EVENT_PROPAGATE;
         }
@@ -314,14 +321,37 @@ export default class OpenWisprExtension extends Extension {
     }
 
     _isHoldToSpeakReleaseEvent(keySymbol, modifiers) {
-        if (!this._holdToSpeakBinding.valid)
+        return this._isBindingReleaseEvent(this._holdToSpeakBinding, keySymbol, modifiers);
+    }
+
+    _isBindingReleaseEvent(binding, keySymbol, modifiers) {
+        if (!binding?.valid)
             return false;
 
-        const releasedHoldKey = this._holdToSpeakBinding.keyvals.includes(keySymbol);
+        const releasedHoldKey = binding.keyvals.includes(keySymbol);
         const modifiersStillHeld =
-            (modifiers & this._holdToSpeakBinding.modifierMask) === this._holdToSpeakBinding.modifierMask;
+            (modifiers & binding.modifierMask) === binding.modifierMask;
 
         return releasedHoldKey || !modifiersStillHeld;
+    }
+
+    _isRemotePortalReleaseEvent(keySymbol, modifiers) {
+        if (!this._recordingTrigger?.startsWith('remote:portal'))
+            return false;
+
+        return this._isBindingReleaseEvent(this._remoteHoldBinding, keySymbol, modifiers);
+    }
+
+    _parseRemotePortalBinding(source) {
+        if (!source || !source.startsWith('portal:'))
+            return null;
+
+        const trigger = source.slice('portal:'.length).trim();
+        if (!trigger)
+            return null;
+
+        const parsed = this._parseAccelerator(trigger);
+        return parsed.valid ? parsed : null;
     }
 
     _parseAccelerator(accelerator) {
@@ -857,6 +887,7 @@ export default class OpenWisprExtension extends Extension {
         this._recording = false;
         this._processing = false;
         this._recordingTrigger = null;
+        this._remoteHoldBinding = null;
         this._recordProc = null;
         if (this._icon) {
             this._icon.icon_name = 'microphone-sensitivity-high-symbolic';

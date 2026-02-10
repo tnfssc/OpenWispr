@@ -1,4 +1,4 @@
-name: Build GNOME Extension ZIP
+name: Build Extension And Companion Assets
 
 on:
   release:
@@ -10,12 +10,18 @@ permissions:
 
 jobs:
   package:
-    name: Package extension for e.g.o
+    name: Package release assets
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
 
       - name: Install packaging tools
         run: sudo apt-get update && sudo apt-get install -y libglib2.0-bin jq zip rsync
@@ -68,11 +74,47 @@ jobs:
           echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
           echo "zip_path=$ZIP_PATH" >> "$GITHUB_OUTPUT"
 
+      - name: Build companion binaries
+        id: companion
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+
+          VERSION="${RELEASE_TAG:-manual-${GITHUB_SHA::7}}"
+          VERSION="${VERSION#v}"
+
+          DIST_DIR="$RUNNER_TEMP/openwispr-dist"
+          mkdir -p "$DIST_DIR"
+
+          for ARCH in amd64 arm64; do
+            BIN_NAME="openwispr-linux-${ARCH}"
+            GOOS=linux GOARCH="$ARCH" CGO_ENABLED=0 go build -trimpath -o "$DIST_DIR/$BIN_NAME" ./cmd/openwispr
+            tar -C "$DIST_DIR" -czf "$DIST_DIR/${BIN_NAME}.tar.gz" "$BIN_NAME"
+          done
+
+          (
+            cd "$DIST_DIR"
+            sha256sum openwispr-linux-amd64.tar.gz openwispr-linux-arm64.tar.gz > openwispr-${VERSION}-checksums.txt
+          )
+
+          echo "dist_dir=$DIST_DIR" >> "$GITHUB_OUTPUT"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.build.outputs.zip_name }}
           path: ${{ steps.build.outputs.zip_path }}
+          if-no-files-found: error
+
+      - name: Upload companion artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwispr-companion-binaries
+          path: |
+            ${{ steps.companion.outputs.dist_dir }}/openwispr-linux-amd64.tar.gz
+            ${{ steps.companion.outputs.dist_dir }}/openwispr-linux-arm64.tar.gz
+            ${{ steps.companion.outputs.dist_dir }}/openwispr-*-checksums.txt
           if-no-files-found: error
 
       - name: Attach zip to GitHub Release
@@ -81,6 +123,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           ZIP_PATH: ${{ steps.build.outputs.zip_path }}
+          DIST_DIR: ${{ steps.companion.outputs.dist_dir }}
         run: |
           set -euo pipefail
-          gh release upload "$RELEASE_TAG" "$ZIP_PATH" --clobber
+          gh release upload "$RELEASE_TAG" \
+            "$ZIP_PATH" \
+            "$DIST_DIR"/openwispr-linux-amd64.tar.gz \
+            "$DIST_DIR"/openwispr-linux-arm64.tar.gz \
+            "$DIST_DIR"/openwispr-*-checksums.txt \
+            --clobber

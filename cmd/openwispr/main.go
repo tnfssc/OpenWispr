@@ -164,6 +164,7 @@ func runPortalDaemon(ctx context.Context, conn *dbus.Conn, client *extensionClie
 	}
 
 	log.Printf("portal shortcut session ready trigger=%s", preferredTrigger)
+	portalSource := fmt.Sprintf("portal:%s", preferredTrigger)
 
 	if err := conn.AddMatchSignal(
 		dbus.WithMatchObjectPath(portalDesktopPath),
@@ -230,7 +231,7 @@ func runPortalDaemon(ctx context.Context, conn *dbus.Conn, client *extensionClie
 			if sig.Name == portalGSInterface+".Activated" {
 				if portalHeld {
 					portalHeld = false
-					stopped, err := client.Stop(true, "portal")
+					stopped, err := client.Stop(true, portalSource)
 					if err != nil {
 						log.Printf("portal activated-release fallback but stop failed: %v", err)
 						continue
@@ -239,7 +240,7 @@ func runPortalDaemon(ctx context.Context, conn *dbus.Conn, client *extensionClie
 					continue
 				}
 
-				started, err := client.Start("portal")
+				started, err := client.Start(portalSource)
 				if err != nil {
 					log.Printf("portal activated but start failed: %v", err)
 					continue
@@ -252,7 +253,7 @@ func runPortalDaemon(ctx context.Context, conn *dbus.Conn, client *extensionClie
 			}
 
 			portalHeld = false
-			stopped, err := client.Stop(true, "portal")
+			stopped, err := client.Stop(true, portalSource)
 			if err != nil {
 				log.Printf("portal deactivated but stop failed: %v", err)
 				continue
