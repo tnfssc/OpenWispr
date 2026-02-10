@@ -146,6 +146,8 @@ sudo usermod -aG input "$USER"
 # then log out and back in
 ```
 
+Note: the GitHub Release companion binaries are built with `CGO_ENABLED=0` for portability, so evdev fallback is disabled there. Build from source on Linux with cgo enabled if you need evdev fallback.
+
 > Note: Some apps (especially terminals, password fields, or secure/sandboxed inputs) may block simulated paste events. In those cases, use clipboard paste manually.
 
 ## Configuration
