@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=OpenWispr Companion
+Comment=OpenWispr portal companion registration entry
+Exec=openwispr
+Terminal=false
+NoDisplay=true
+Categories=Utility;

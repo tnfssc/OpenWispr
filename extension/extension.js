@@ -16,6 +16,31 @@ const WHISPER_BINARY = GLib.find_program_in_path('whisper-cli') || '/usr/bin/whi
 const FFMPEG_BINARY = GLib.find_program_in_path('ffmpeg') || '/usr/bin/ffmpeg';
 const CURL_BINARY = GLib.find_program_in_path('curl') || '/usr/bin/curl';
 const DEBUG_LOGS = false;
+const DBUS_CONTROL_BUS_NAME = 'org.gnome.Shell.Extensions.OpenWispr';
+const DBUS_CONTROL_PATH = '/org/gnome/Shell/Extensions/OpenWispr';
+const DBUS_CONTROL_IFACE = `
+<node>
+  <interface name="org.gnome.Shell.Extensions.OpenWispr">
+    <method name="Toggle">
+      <arg name="source" type="s" direction="in"/>
+      <arg name="recording" type="b" direction="out"/>
+    </method>
+    <method name="Start">
+      <arg name="source" type="s" direction="in"/>
+      <arg name="started" type="b" direction="out"/>
+    </method>
+    <method name="Stop">
+      <arg name="transcribe" type="b" direction="in"/>
+      <arg name="source" type="s" direction="in"/>
+      <arg name="stopped" type="b" direction="out"/>
+    </method>
+    <method name="Status">
+      <arg name="recording" type="b" direction="out"/>
+      <arg name="processing" type="b" direction="out"/>
+      <arg name="trigger" type="s" direction="out"/>
+    </method>
+  </interface>
+</node>`;
 
 export default class OpenWisprExtension extends Extension {
     enable() {
@@ -62,6 +87,41 @@ export default class OpenWisprExtension extends Extension {
             Shell.ActionMode.ALL,
             () => this._toggleRecording()
         );
+
+        try {
+            this._dbusConn = null;
+            this._dbusApi = {
+                Toggle: source => this.Toggle(source),
+                Start: source => this.Start(source),
+                Stop: (transcribe, source) => this.Stop(transcribe, source),
+                Status: () => this.Status(),
+            };
+            this._dbusNameOwnerId = Gio.DBus.own_name(
+                Gio.BusType.SESSION,
+                DBUS_CONTROL_BUS_NAME,
+                Gio.BusNameOwnerFlags.NONE,
+                connection => {
+                    this._dbusConn = connection;
+                    this._dbusControl = Gio.DBusExportedObject.wrapJSObject(DBUS_CONTROL_IFACE, this._dbusApi);
+                    this._dbusControl.export(connection, DBUS_CONTROL_PATH);
+                },
+                null,
+                () => {
+                    if (this._dbusControl) {
+                        this._dbusControl.unexport();
+                        this._dbusControl = null;
+                    }
+                    this._dbusConn = null;
+                    console.error('[openwispr-gnome-extension] Failed to acquire DBus bus name');
+                }
+            );
+        } catch (e) {
+            console.error(`[openwispr-gnome-extension] Failed to export DBus control interface: ${e}`);
+            this._dbusNameOwnerId = null;
+            this._dbusConn = null;
+            this._dbusControl = null;
+            this._dbusApi = null;
+        }
 
         this._capturedEventId = global.stage.connect(
             'captured-event',
@@ -131,8 +191,70 @@ export default class OpenWisprExtension extends Extension {
 
         this._icon = null;
 
+        if (this._dbusControl) {
+            this._dbusControl.flush();
+            this._dbusControl.unexport();
+            this._dbusControl = null;
+        }
+
+        this._dbusApi = null;
+
+        if (this._dbusNameOwnerId) {
+            Gio.bus_unown_name(this._dbusNameOwnerId);
+            this._dbusNameOwnerId = null;
+        }
+
+        this._dbusConn = null;
+
         Main.wm.removeKeybinding('toggle-recording');
         this._settings = null;
+    }
+
+    Toggle(source) {
+        const triggerSource = source || 'external';
+
+        if (this._recording) {
+            this._debug(`DBus toggle stop requested by ${triggerSource}`);
+            this._stopRecording(true);
+            return false;
+        }
+
+        if (this._processing)
+            return false;
+
+        this._debug(`DBus toggle start requested by ${triggerSource}`);
+        this._startRecording(`remote:${triggerSource}`);
+        return this._recording;
+    }
+
+    Start(source) {
+        const triggerSource = source || 'external';
+
+        if (this._recording || this._processing)
+            return false;
+
+        this._debug(`DBus start requested by ${triggerSource}`);
+        this._startRecording(`remote:${triggerSource}`);
+        return this._recording;
+    }
+
+    Stop(transcribe, source) {
+        const triggerSource = source || 'external';
+
+        if (!this._recording)
+            return false;
+
+        this._debug(`DBus stop requested by ${triggerSource}`);
+        this._stopRecording(Boolean(transcribe));
+        return true;
+    }
+
+    Status() {
+        return [
+            this._recording,
+            this._processing,
+            this._recordingTrigger ?? '',
+        ];
     }
 
     _toggleRecording() {

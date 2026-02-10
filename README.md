@@ -14,6 +14,7 @@
 - **Silence Cutting**: Uses `ffmpeg` to cut silent parts before transcription.
 - **Configurable STT Backends**: Choose local `whisper-cli`, OpenAI Whisper endpoint, or Groq endpoint.
 - **LLM Transcript Cleanup**: Optionally post-process transcript text with OpenAI or Groq models.
+- **Companion CLI + Daemon**: Includes `openwispr` CLI for GNOME custom shortcuts and an optional hold daemon.
 - **System Integration**: Seamless integration with the GNOME top bar.
 - **Clipboard Injection**: Automatically pastes transcribed text into the active text field.
 - **Clipboard-Only Mode**: Optionally copy transcription without auto-paste for apps where paste is unsafe.
@@ -29,6 +30,7 @@ Before installing, ensure you have the following dependencies:
     *   *Note: This extension expects the `whisper-cli` binary specifically.*
 3.  **ffmpeg**: Required for silence trimming.
 4.  **curl**: Required for remote STT/LLM endpoints.
+5.  **go** (optional): Needed only to build the companion `openwispr` CLI from source.
 
 ## Installation
 
@@ -73,6 +75,77 @@ Before installing, ensure you have the following dependencies:
     *   The extension trims silence with ffmpeg (if enabled), transcribes, then optionally runs LLM cleanup.
     *   Once complete, the text will be automatically pasted into your active window and copied to your clipboard.
 
+### Companion CLI
+
+The installer builds `~/.local/bin/openwispr` (when `go` is installed).
+
+If you need to build manually:
+
+```bash
+mkdir -p ~/.local/bin
+go build -o ~/.local/bin/openwispr ./cmd/openwispr
+```
+
+```bash
+openwispr toggle
+openwispr start
+openwispr stop
+openwispr status
+openwispr doctor
+```
+
+Quick DBus check (extension must be enabled):
+
+```bash
+gdbus call --session --dest org.gnome.Shell.Extensions.OpenWispr --object-path /org/gnome/Shell/Extensions/OpenWispr --method org.gnome.Shell.Extensions.OpenWispr.Status
+```
+
+If you just changed extension code and DBus is still missing, log out and back in once to fully restart GNOME Shell.
+
+### Hold Daemon (Right Alt)
+
+For more reliable hold-to-talk behavior, use the companion daemon:
+
+```bash
+systemctl --user enable --now openwispr-hotkeyd.service
+```
+
+The default service runs:
+
+```bash
+openwispr daemon --backend auto --trigger Alt_R --evdev-key rightalt
+```
+
+`auto` tries the portal backend first, then falls back to evdev if needed.
+
+On some GNOME setups, modifier-only triggers such as `Alt_R` may emit `Activated` without `Deactivated`; the companion daemon handles this by treating the next `Activated` as release.
+
+To install/update the service manually:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp companion/openwispr-hotkeyd.service ~/.config/systemd/user/
+mkdir -p ~/.local/share/applications
+cp companion/io.github.tnfssc.openwispr.desktop ~/.local/share/applications/
+systemctl --user daemon-reload
+systemctl --user enable --now openwispr-hotkeyd.service
+```
+
+The desktop entry is required so GNOME GlobalShortcuts can associate a valid app ID (`io.github.tnfssc.openwispr`) with the daemon.
+
+Portal-only test run:
+
+```bash
+openwispr daemon --backend portal --trigger Alt_R
+```
+
+If evdev fallback is needed, ensure input permissions (example for current user):
+
+```bash
+sudo usermod -aG input "$USER"
+# then log out and back in
+```
+
 > Note: Some apps (especially terminals, password fields, or secure/sandboxed inputs) may block simulated paste events. In those cases, use clipboard paste manually.
 
 ## Configuration
@@ -88,6 +161,16 @@ Hold-to-speak can be enabled/disabled in extension preferences or via:
 Hold-to-speak shortcut can be configured in extension preferences or via:
 *   **Schema**: `org.gnome.shell.extensions.openwispr`
 *   **Key**: `hold-to-speak-keybinding`
+
+For GNOME Settings > Keyboard > Custom Shortcuts, you can set:
+*   **Name**: `openwispr-toggle`
+*   **Command**: `openwispr toggle`
+
+For start/stop split bindings (optional):
+*   **Name**: `openwispr-start`
+*   **Command**: `openwispr start`
+*   **Name**: `openwispr-stop`
+*   **Command**: `openwispr stop`
 
 Auto-paste behavior can be toggled in extension preferences or via:
 *   **Schema**: `org.gnome.shell.extensions.openwispr`

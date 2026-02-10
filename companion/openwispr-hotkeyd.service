@@ -1,0 +1,12 @@
+[Unit]
+Description=openwispr hold-to-talk daemon
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/openwispr daemon --backend auto --trigger Alt_R --evdev-key rightalt
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
