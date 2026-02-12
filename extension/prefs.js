@@ -1,4 +1,6 @@
 import Adw from 'gi://Adw';
+import Gdk from 'gi://Gdk';
+import Gio from 'gi://Gio';
 import Gtk from 'gi://Gtk';
 
 import { ExtensionPreferences, gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
@@ -9,6 +11,54 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
 
         const page = new Adw.PreferencesPage();
         window.add(page);
+
+        const companionGroup = new Adw.PreferencesGroup({
+            title: _('Companion Setup'),
+            description: _('Recording/transcription runs through the openwispr companion user service.'),
+        });
+        page.add(companionGroup);
+
+        const releasesUrl = 'https://github.com/tnfssc/openwispr-gnome-extension/releases/latest';
+        const installCommand = [
+            'ARCH="$(uname -m)"',
+            'case "$ARCH" in x86_64) BIN=openwispr-linux-amd64 ;; aarch64|arm64) BIN=openwispr-linux-arm64 ;; *) echo "Unsupported arch: $ARCH"; exit 1 ;; esac',
+            'REPO="https://github.com/tnfssc/openwispr-gnome-extension/releases/latest/download"',
+            'TMP="$(mktemp -d)"',
+            'mkdir -p ~/.local/bin ~/.config/systemd/user ~/.local/share/applications',
+            'curl -fsSL "$REPO/${BIN}.tar.gz" -o "$TMP/${BIN}.tar.gz"',
+            'tar -xzf "$TMP/${BIN}.tar.gz" -C "$TMP"',
+            'install -Dm755 "$TMP/$BIN" ~/.local/bin/openwispr',
+            'curl -fsSL "$REPO/openwispr-engine.service" -o ~/.config/systemd/user/openwispr-engine.service',
+            'curl -fsSL "$REPO/openwispr-hotkeyd.service" -o ~/.config/systemd/user/openwispr-hotkeyd.service',
+            'curl -fsSL "$REPO/io.github.tnfssc.openwispr.desktop" -o ~/.local/share/applications/io.github.tnfssc.openwispr.desktop',
+            'systemctl --user daemon-reload',
+            'systemctl --user enable --now openwispr-engine.service',
+        ].join('; ');
+
+        this._addLinkRow(
+            companionGroup,
+            _('Open Latest Release Assets'),
+            _('Download companion binaries and service files from GitHub Releases.'),
+            releasesUrl
+        );
+        this._addCommandRow(
+            companionGroup,
+            _('Copy Install Command'),
+            _('Downloads companion binary + service files and enables openwispr-engine.service.'),
+            installCommand
+        );
+        this._addCommandRow(
+            companionGroup,
+            _('Copy Optional Hold Daemon Command'),
+            _('Enables hold-to-talk daemon (portal first, evdev fallback).'),
+            'systemctl --user enable --now openwispr-hotkeyd.service'
+        );
+        this._addCommandRow(
+            companionGroup,
+            _('Copy Health Check Command'),
+            _('Verifies extension DBus, portal support, and companion engine availability.'),
+            'openwispr doctor'
+        );
 
         const shortcutsGroup = new Adw.PreferencesGroup({ title: _('Shortcuts') });
         page.add(shortcutsGroup);
@@ -176,6 +226,58 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         });
         row.connect('notify::text', () => settings.set_string(key, row.text));
         group.add(row);
+    }
+
+    _addLinkRow(group, title, subtitle, url) {
+        const row = new Adw.ActionRow({
+            title,
+            subtitle,
+        });
+
+        const openButton = new Gtk.Button({
+            label: _('Open'),
+            valign: Gtk.Align.CENTER,
+        });
+        openButton.connect('clicked', () => this._openUri(url));
+
+        row.add_suffix(openButton);
+        row.activatable_widget = openButton;
+        group.add(row);
+    }
+
+    _addCommandRow(group, title, subtitle, command) {
+        const row = new Adw.ActionRow({
+            title,
+            subtitle,
+        });
+
+        const copyButton = new Gtk.Button({
+            label: _('Copy'),
+            valign: Gtk.Align.CENTER,
+        });
+        copyButton.connect('clicked', () => this._copyToClipboard(command));
+
+        row.add_suffix(copyButton);
+        row.activatable_widget = copyButton;
+        group.add(row);
+    }
+
+    _copyToClipboard(text) {
+        try {
+            const display = Gdk.Display.get_default();
+            const clipboard = display?.get_clipboard();
+            clipboard?.set(text);
+        } catch (e) {
+            console.error(`[openwispr-gnome-extension] Failed to copy command: ${e}`);
+        }
+    }
+
+    _openUri(url) {
+        try {
+            Gio.AppInfo.launch_default_for_uri(url, null);
+        } catch (e) {
+            console.error(`[openwispr-gnome-extension] Failed to open URL: ${e}`);
+        }
     }
 
     _normalizeProvider(provider) {

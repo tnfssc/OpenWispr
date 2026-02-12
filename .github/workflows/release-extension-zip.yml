@@ -111,6 +111,9 @@ jobs:
             ${{ steps.companion.outputs.dist_dir }}/openwispr-linux-amd64.tar.gz
             ${{ steps.companion.outputs.dist_dir }}/openwispr-linux-arm64.tar.gz
             ${{ steps.companion.outputs.dist_dir }}/openwispr-*-checksums.txt
+            companion/openwispr-engine.service
+            companion/openwispr-hotkeyd.service
+            companion/io.github.tnfssc.openwispr.desktop
           if-no-files-found: error
 
       - name: Attach zip to GitHub Release
@@ -127,4 +130,7 @@ jobs:
             "$DIST_DIR"/openwispr-linux-amd64.tar.gz \
             "$DIST_DIR"/openwispr-linux-arm64.tar.gz \
             "$DIST_DIR"/openwispr-*-checksums.txt \
+            companion/openwispr-engine.service \
+            companion/openwispr-hotkeyd.service \
+            companion/io.github.tnfssc.openwispr.desktop \
             --clobber

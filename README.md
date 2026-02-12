@@ -78,6 +78,40 @@ Before installing, ensure you have the following dependencies:
 
 The installer builds `~/.local/bin/openwispr` (when `go` is installed).
 
+### Install Companion From GitHub Releases
+
+If you installed the GNOME extension from extensions.gnome.org, you can install the companion without building from source:
+
+```bash
+ARCH="$(uname -m)"
+case "$ARCH" in
+  x86_64) BIN="openwispr-linux-amd64" ;;
+  aarch64|arm64) BIN="openwispr-linux-arm64" ;;
+  *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
+esac
+
+REPO="https://github.com/tnfssc/openwispr-gnome-extension/releases/latest/download"
+TMP="$(mktemp -d)"
+
+mkdir -p ~/.local/bin ~/.config/systemd/user ~/.local/share/applications
+curl -fsSL "$REPO/${BIN}.tar.gz" -o "$TMP/${BIN}.tar.gz"
+tar -xzf "$TMP/${BIN}.tar.gz" -C "$TMP"
+install -Dm755 "$TMP/$BIN" ~/.local/bin/openwispr
+
+curl -fsSL "$REPO/openwispr-engine.service" -o ~/.config/systemd/user/openwispr-engine.service
+curl -fsSL "$REPO/openwispr-hotkeyd.service" -o ~/.config/systemd/user/openwispr-hotkeyd.service
+curl -fsSL "$REPO/io.github.tnfssc.openwispr.desktop" -o ~/.local/share/applications/io.github.tnfssc.openwispr.desktop
+
+systemctl --user daemon-reload
+systemctl --user enable --now openwispr-engine.service
+```
+
+Optional hold-to-talk daemon:
+
+```bash
+systemctl --user enable --now openwispr-hotkeyd.service
+```
+
 If you need to build manually:
 
 ```bash
