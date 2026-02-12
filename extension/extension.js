@@ -10,11 +10,11 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import { Extension, gettext as _ } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 // Constants
-const OUTPUT_FILE = GLib.get_tmp_dir() + '/openwispr_recording.wav';
-const TRIMMED_OUTPUT_FILE = GLib.get_tmp_dir() + '/openwispr_recording_trimmed.wav';
-const WHISPER_BINARY = GLib.find_program_in_path('whisper-cli') || '/usr/bin/whisper-cli';
-const FFMPEG_BINARY = GLib.find_program_in_path('ffmpeg') || '/usr/bin/ffmpeg';
-const CURL_BINARY = GLib.find_program_in_path('curl') || '/usr/bin/curl';
+const OUTPUT_FILE_BASENAME = 'openwispr_recording.wav';
+const TRIMMED_OUTPUT_FILE_BASENAME = 'openwispr_recording_trimmed.wav';
+const WHISPER_BINARY_FALLBACK = '/usr/bin/whisper-cli';
+const FFMPEG_BINARY_FALLBACK = '/usr/bin/ffmpeg';
+const CURL_BINARY_FALLBACK = '/usr/bin/curl';
 const DEBUG_LOGS = false;
 const DBUS_CONTROL_BUS_NAME = 'org.gnome.Shell.Extensions.OpenWispr';
 const DBUS_CONTROL_PATH = '/org/gnome/Shell/Extensions/OpenWispr';
@@ -42,7 +42,18 @@ const DBUS_CONTROL_IFACE = `
   </interface>
 </node>`;
 
-export default class OpenWisprExtension extends Extension {
+class OpenWisprController {
+    constructor(extension) {
+        this._extension = extension;
+        this.uuid = extension.uuid;
+        this.metadata = extension.metadata;
+        this.dir = extension.dir;
+    }
+
+    getSettings() {
+        return this._extension.getSettings();
+    }
+
     enable() {
         this._settings = this.getSettings();
         this._migrateLegacyProviderNames();
@@ -59,6 +70,11 @@ export default class OpenWisprExtension extends Extension {
         );
         this._autoPasteEnabled = this._settings.get_boolean('auto-paste-enabled');
         this._notificationsEnabled = this._settings.get_boolean('notifications-enabled');
+        this._outputFile = GLib.build_filenamev([GLib.get_tmp_dir(), OUTPUT_FILE_BASENAME]);
+        this._trimmedOutputFile = GLib.build_filenamev([GLib.get_tmp_dir(), TRIMMED_OUTPUT_FILE_BASENAME]);
+        this._whisperBinary = GLib.find_program_in_path('whisper-cli') || WHISPER_BINARY_FALLBACK;
+        this._ffmpegBinary = GLib.find_program_in_path('ffmpeg') || FFMPEG_BINARY_FALLBACK;
+        this._curlBinary = GLib.find_program_in_path('curl') || CURL_BINARY_FALLBACK;
 
         // resolve paths relative to extension dir
         this._modelPath = this.dir.get_child('models').get_child('ggml-base.en.bin').get_path();
@@ -451,7 +467,7 @@ export default class OpenWisprExtension extends Extension {
 
         try {
             const proc = new Gio.Subprocess({
-                argv: ['gjs', '-m', this._recorderScript, OUTPUT_FILE],
+                argv: ['gjs', '-m', this._recorderScript, this._outputFile],
                 flags: Gio.SubprocessFlags.NONE
             });
             
@@ -501,7 +517,7 @@ export default class OpenWisprExtension extends Extension {
     }
 
     _processRecordingPipeline() {
-        this._trimSilence(OUTPUT_FILE, (processedPath) => {
+        this._trimSilence(this._outputFile, (processedPath) => {
             this._transcribeAudio(processedPath, (transcript) => {
                 if (transcript === null) {
                     this._resetState();
@@ -531,7 +547,7 @@ export default class OpenWisprExtension extends Extension {
             return;
         }
 
-        if (!GLib.file_test(FFMPEG_BINARY, GLib.FileTest.EXISTS)) {
+        if (!GLib.file_test(this._ffmpegBinary, GLib.FileTest.EXISTS)) {
             console.warn('[openwispr-gnome-extension] ffmpeg not found; skipping silence trim.');
             callback(inputPath);
             return;
@@ -543,7 +559,7 @@ export default class OpenWisprExtension extends Extension {
 
         this._runSubprocess(
             [
-                FFMPEG_BINARY,
+                this._ffmpegBinary,
                 '-y',
                 '-hide_banner',
                 '-loglevel',
@@ -552,7 +568,7 @@ export default class OpenWisprExtension extends Extension {
                 inputPath,
                 '-af',
                 filter,
-                TRIMMED_OUTPUT_FILE,
+                this._trimmedOutputFile,
             ],
             (ok, _stdout, stderr) => {
                 if (!ok) {
@@ -562,10 +578,10 @@ export default class OpenWisprExtension extends Extension {
                 }
 
                 try {
-                    const trimmedFile = Gio.File.new_for_path(TRIMMED_OUTPUT_FILE);
+                    const trimmedFile = Gio.File.new_for_path(this._trimmedOutputFile);
                     const info = trimmedFile.query_info('standard::size', Gio.FileQueryInfoFlags.NONE, null);
                     if (info.get_size() > 0) {
-                        callback(TRIMMED_OUTPUT_FILE);
+                        callback(this._trimmedOutputFile);
                         return;
                     }
                 } catch (e) {
@@ -593,7 +609,7 @@ export default class OpenWisprExtension extends Extension {
 
         this._runSubprocess(
             [
-                WHISPER_BINARY,
+                this._whisperBinary,
                 '-m',
                 this._modelPath,
                 '-f',
@@ -628,7 +644,7 @@ export default class OpenWisprExtension extends Extension {
     }
 
     _transcribeRemote(inputPath, provider, callback) {
-        if (!GLib.file_test(CURL_BINARY, GLib.FileTest.EXISTS)) {
+        if (!GLib.file_test(this._curlBinary, GLib.FileTest.EXISTS)) {
             this._notifyError('curl is required for remote speech-to-text.');
             callback(null);
             return;
@@ -648,7 +664,7 @@ export default class OpenWisprExtension extends Extension {
         this._debug(`Transcribing with ${provider} endpoint...`);
         this._runSubprocess(
             [
-                CURL_BINARY,
+                this._curlBinary,
                 '-sS',
                 '-X',
                 'POST',
@@ -706,7 +722,7 @@ export default class OpenWisprExtension extends Extension {
             return;
         }
 
-        if (!GLib.file_test(CURL_BINARY, GLib.FileTest.EXISTS)) {
+        if (!GLib.file_test(this._curlBinary, GLib.FileTest.EXISTS)) {
             this._notifyError('curl is required for LLM cleanup.');
             callback(text);
             return;
@@ -736,7 +752,7 @@ export default class OpenWisprExtension extends Extension {
 
         this._runSubprocess(
             [
-                CURL_BINARY,
+                this._curlBinary,
                 '-sS',
                 '-X',
                 'POST',
@@ -900,5 +916,20 @@ export default class OpenWisprExtension extends Extension {
             return;
 
         console.debug(`[openwispr-gnome-extension] ${message}`);
+    }
+}
+
+export default class OpenWisprExtension extends Extension {
+    enable() {
+        this._controller = new OpenWisprController(this);
+        this._controller.enable();
+    }
+
+    disable() {
+        if (!this._controller)
+            return;
+
+        this._controller.disable();
+        this._controller = null;
     }
 }

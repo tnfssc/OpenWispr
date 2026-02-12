@@ -1,3 +1,5 @@
+#!@GJS@ -m
+
 import Gst from 'gi://Gst';
 import GLib from 'gi://GLib';
 import system from 'system';
