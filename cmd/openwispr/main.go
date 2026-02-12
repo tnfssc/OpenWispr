@@ -21,6 +21,10 @@ const (
 	extensionPath      = dbus.ObjectPath("/org/gnome/Shell/Extensions/OpenWispr")
 	extensionInterface = "org.gnome.Shell.Extensions.OpenWispr"
 
+	companionBusName   = "io.github.tnfssc.OpenWispr.Recorder"
+	companionPath      = dbus.ObjectPath("/io/github/tnfssc/OpenWispr/Recorder")
+	companionInterface = "io.github.tnfssc.OpenWispr.Recorder"
+
 	portalBusName          = "org.freedesktop.portal.Desktop"
 	portalDesktopPath      = dbus.ObjectPath("/org/freedesktop/portal/desktop")
 	portalGSInterface      = "org.freedesktop.portal.GlobalShortcuts"
@@ -102,6 +106,10 @@ func main() {
 	case "daemon":
 		if err := runDaemon(os.Args[2:], conn, client); err != nil {
 			fatalf("daemon failed: %v", err)
+		}
+	case "engine":
+		if err := runEngine(conn); err != nil {
+			fatalf("engine failed: %v", err)
 		}
 	default:
 		usage()
@@ -277,6 +285,14 @@ func runDoctor(conn *dbus.Conn, client *extensionClient) error {
 		return fmt.Errorf("portal globalshortcuts unavailable: %w", err)
 	}
 	fmt.Printf("[ok] portal GlobalShortcuts version=%d\n", version)
+
+	companionObj := conn.Object(companionBusName, companionPath)
+	var engineRecording, engineProcessing bool
+	if err := companionObj.Call(companionInterface+".Status", 0).Store(&engineRecording, &engineProcessing); err != nil {
+		fmt.Printf("[warn] companion engine unavailable: %v\n", err)
+	} else {
+		fmt.Printf("[ok] companion engine reachable recording=%t processing=%t\n", engineRecording, engineProcessing)
+	}
 
 	if _, err := os.Open(defaultEvdevDevice); err != nil {
 		fmt.Printf("[warn] cannot read %s: %v\n", defaultEvdevDevice, err)
@@ -577,6 +593,7 @@ Usage:
   openwispr status
   openwispr doctor
   openwispr daemon [--backend auto|portal|evdev] [--trigger Alt_R] [--device /dev/input/... ] [--evdev-key rightalt]
+  openwispr engine
 `)
 }
 

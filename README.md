@@ -14,7 +14,7 @@
 - **Silence Cutting**: Uses `ffmpeg` to cut silent parts before transcription.
 - **Configurable STT Backends**: Choose local `whisper-cli`, OpenAI Whisper endpoint, or Groq endpoint.
 - **LLM Transcript Cleanup**: Optionally post-process transcript text with OpenAI or Groq models.
-- **Companion CLI + Daemon**: Includes `openwispr` CLI for GNOME custom shortcuts and an optional hold daemon.
+- **Companion Engine + Daemon**: Uses `openwispr` user services over D-Bus for recording/transcription and optional hold daemon shortcuts.
 - **System Integration**: Seamless integration with the GNOME top bar.
 - **Clipboard Injection**: Automatically pastes transcribed text into the active text field.
 - **Clipboard-Only Mode**: Optionally copy transcription without auto-paste for apps where paste is unsafe.
@@ -29,8 +29,7 @@ Before installing, ensure you have the following dependencies:
     *   Ensure `whisper-cli` is installed and available in your system `PATH`.
     *   *Note: This extension expects the `whisper-cli` binary specifically.*
 3.  **ffmpeg**: Required for silence trimming.
-4.  **curl**: Required for remote STT/LLM endpoints.
-5.  **go** (optional): Needed only to build the companion `openwispr` CLI from source.
+4.  **go** (optional): Needed only to build the companion `openwispr` binary from source.
 
 ## Installation
 
@@ -92,6 +91,7 @@ openwispr start
 openwispr stop
 openwispr status
 openwispr doctor
+openwispr engine
 ```
 
 Quick DBus check (extension must be enabled):
@@ -101,6 +101,12 @@ gdbus call --session --dest org.gnome.Shell.Extensions.OpenWispr --object-path /
 ```
 
 If you just changed extension code and DBus is still missing, log out and back in once to fully restart GNOME Shell.
+
+The extension now talks to the companion engine over D-Bus for recording/transcription. Ensure this service is active:
+
+```bash
+systemctl --user enable --now openwispr-engine.service
+```
 
 ### Hold Daemon (Right Alt)
 
@@ -124,10 +130,12 @@ To install/update the service manually:
 
 ```bash
 mkdir -p ~/.config/systemd/user
+cp companion/openwispr-engine.service ~/.config/systemd/user/
 cp companion/openwispr-hotkeyd.service ~/.config/systemd/user/
 mkdir -p ~/.local/share/applications
 cp companion/io.github.tnfssc.openwispr.desktop ~/.local/share/applications/
 systemctl --user daemon-reload
+systemctl --user enable --now openwispr-engine.service
 systemctl --user enable --now openwispr-hotkeyd.service
 ```
 

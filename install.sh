@@ -25,12 +25,14 @@ if which go >/dev/null; then
     go build -o "$HOME/.local/bin/openwispr" "$(pwd)/cmd/openwispr"
 
     mkdir -p "$HOME/.config/systemd/user"
+    cp "$(pwd)/companion/openwispr-engine.service" "$HOME/.config/systemd/user/openwispr-engine.service"
     cp "$(pwd)/companion/openwispr-hotkeyd.service" "$HOME/.config/systemd/user/openwispr-hotkeyd.service"
 
     mkdir -p "$HOME/.local/share/applications"
     cp "$(pwd)/companion/io.github.tnfssc.openwispr.desktop" "$HOME/.local/share/applications/io.github.tnfssc.openwispr.desktop"
 
     systemctl --user daemon-reload >/dev/null 2>&1 || true
+    systemctl --user enable --now openwispr-engine.service >/dev/null 2>&1 || true
 else
     echo "  [WARN] go not found in PATH. Companion CLI was not built."
 fi
@@ -42,7 +44,8 @@ echo "👉 Next steps:"
 echo "1. Log out and log back in (or restart GNOME Shell if on X11 with Alt+F2, 'r')."
 echo "2. Enable the extension: gnome-extensions enable $UUID"
 echo "3. Open extension preferences to set an optional keyboard shortcut."
-echo "4. Optional: enable hold daemon: systemctl --user enable --now openwispr-hotkeyd.service"
+echo "4. Engine service: systemctl --user enable --now openwispr-engine.service"
+echo "5. Optional hold daemon: systemctl --user enable --now openwispr-hotkeyd.service"
 echo ""
 echo "Dependencies check:"
 if which whisper-cli >/dev/null; then
@@ -55,12 +58,6 @@ if which ffmpeg >/dev/null; then
     echo "  [OK] ffmpeg found at $(which ffmpeg)"
 else
     echo "  [WARN] ffmpeg NOT found in PATH. Silence trimming will be skipped."
-fi
-
-if which curl >/dev/null; then
-    echo "  [OK] curl found at $(which curl)"
-else
-    echo "  [WARN] curl NOT found in PATH. Remote STT and LLM cleanup will fail."
 fi
 
 if which go >/dev/null; then

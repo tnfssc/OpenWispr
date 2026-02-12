@@ -1,6 +1,8 @@
 [Unit]
 Description=openwispr hold-to-talk daemon
 After=graphical-session.target
+Wants=openwispr-engine.service
+After=openwispr-engine.service
 
 [Service]
 Type=simple

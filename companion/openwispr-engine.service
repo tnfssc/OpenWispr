@@ -1,0 +1,12 @@
+[Unit]
+Description=openwispr transcription engine
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/openwispr engine
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

@@ -10,14 +10,12 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import { Extension, gettext as _ } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 // Constants
-const OUTPUT_FILE_BASENAME = 'openwispr_recording.wav';
-const TRIMMED_OUTPUT_FILE_BASENAME = 'openwispr_recording_trimmed.wav';
-const WHISPER_BINARY_FALLBACK = '/usr/bin/whisper-cli';
-const FFMPEG_BINARY_FALLBACK = '/usr/bin/ffmpeg';
-const CURL_BINARY_FALLBACK = '/usr/bin/curl';
 const DEBUG_LOGS = false;
 const DBUS_CONTROL_BUS_NAME = 'org.gnome.Shell.Extensions.OpenWispr';
 const DBUS_CONTROL_PATH = '/org/gnome/Shell/Extensions/OpenWispr';
+const COMPANION_BUS_NAME = 'io.github.tnfssc.OpenWispr.Recorder';
+const COMPANION_OBJECT_PATH = '/io/github/tnfssc/OpenWispr/Recorder';
+const COMPANION_INTERFACE = 'io.github.tnfssc.OpenWispr.Recorder';
 const DBUS_CONTROL_IFACE = `
 <node>
   <interface name="org.gnome.Shell.Extensions.OpenWispr">
@@ -61,7 +59,6 @@ class OpenWisprController {
         this._processing = false;
         this._recordingTrigger = null;
         this._remoteHoldBinding = null;
-        this._recordProc = null;
         this._holdKeyPressed = false;
         this._holdStartCooldownUntilUs = 0;
         this._holdToSpeakEnabled = this._settings.get_boolean('hold-to-speak-enabled');
@@ -70,15 +67,10 @@ class OpenWisprController {
         );
         this._autoPasteEnabled = this._settings.get_boolean('auto-paste-enabled');
         this._notificationsEnabled = this._settings.get_boolean('notifications-enabled');
-        this._outputFile = GLib.build_filenamev([GLib.get_tmp_dir(), OUTPUT_FILE_BASENAME]);
-        this._trimmedOutputFile = GLib.build_filenamev([GLib.get_tmp_dir(), TRIMMED_OUTPUT_FILE_BASENAME]);
-        this._whisperBinary = GLib.find_program_in_path('whisper-cli') || WHISPER_BINARY_FALLBACK;
-        this._ffmpegBinary = GLib.find_program_in_path('ffmpeg') || FFMPEG_BINARY_FALLBACK;
-        this._curlBinary = GLib.find_program_in_path('curl') || CURL_BINARY_FALLBACK;
+        this._companionProxy = null;
 
         // resolve paths relative to extension dir
         this._modelPath = this.dir.get_child('models').get_child('ggml-base.en.bin').get_path();
-        this._recorderScript = this.dir.get_child('scripts').get_child('record_audio.js').get_path();
 
         // UI: Panel Indicator
         this._indicator = new PanelMenu.Button(0.0, this.metadata.name, false);
@@ -222,6 +214,7 @@ class OpenWisprController {
         }
 
         this._dbusConn = null;
+        this._companionProxy = null;
 
         Main.wm.removeKeybinding('toggle-recording');
         this._settings = null;
@@ -303,8 +296,8 @@ class OpenWisprController {
                 return Clutter.EVENT_PROPAGATE;
 
             if (!this._holdKeyPressed && this._isHoldToSpeakPressEvent(keySymbol, modifiers)) {
-                this._holdKeyPressed = true;
-                this._startRecording('hold');
+                const started = this._startRecording('hold');
+                this._holdKeyPressed = started;
             }
         } else if (eventType === Clutter.EventType.KEY_RELEASE) {
             if (this._isHoldToSpeakReleaseEvent(keySymbol, modifiers)) {
@@ -457,7 +450,31 @@ class OpenWisprController {
 
     _startRecording(trigger = 'toggle') {
         if (this._recording || this._processing)
-            return;
+            return false;
+
+        const proxy = this._getCompanionProxy();
+        if (!proxy) {
+            this._notifyError('OpenWispr companion service is unavailable.');
+            return false;
+        }
+
+        try {
+            const result = proxy.call_sync(
+                'Start',
+                null,
+                Gio.DBusCallFlags.NONE,
+                15000,
+                null
+            );
+            const [started] = result.deep_unpack();
+            if (!started)
+                return false;
+        } catch (e) {
+            console.error(`[openwispr-gnome-extension] Companion start failed: ${e}`);
+            this._notifyError('Failed to start recording via companion service.');
+            this._companionProxy = null;
+            return false;
+        }
 
         this._debug(`Starting recording (${trigger})...`);
         this._recording = true;
@@ -465,23 +482,12 @@ class OpenWisprController {
         this._icon.icon_name = 'media-record-symbolic';
         this._icon.style_class = 'system-status-icon destructive-action'; // Red-ish if theme supports
 
-        try {
-            const proc = new Gio.Subprocess({
-                argv: ['gjs', '-m', this._recorderScript, this._outputFile],
-                flags: Gio.SubprocessFlags.NONE
-            });
-            
-            proc.init(null);
-            this._recordProc = proc;
-            
-        } catch (e) {
-            console.error(`[openwispr-gnome-extension] Failed to start recorder: ${e}`);
-            this._resetState();
-        }
+        return true;
     }
 
     _stopRecording(transcribe = true) {
-        if (!this._recording) return;
+        if (!this._recording)
+            return;
 
         this._debug(`Stopping recording (${this._recordingTrigger ?? 'unknown'})...`);
         if (this._recordingTrigger === 'hold')
@@ -490,338 +496,105 @@ class OpenWisprController {
         this._recording = false;
         this._processing = true;
         this._icon.icon_name = 'process-working-symbolic'; // Spinner
-        
-        if (this._recordProc) {
-            // Send SIGINT (2) to stop recording cleanly
-            this._recordProc.send_signal(2);
-            
-            // Wait for it to exit
-            this._recordProc.wait_async(null, (proc, res) => {
-                try {
-                    proc.wait_finish(res);
-                    this._debug('Recorder exited.');
-                    if (transcribe) {
-                        this._processRecordingPipeline();
-                    } else {
-                        this._resetState();
-                    }
-                } catch (e) {
-                    console.error(`[openwispr-gnome-extension] Recorder wait failed: ${e}`);
-                    this._resetState();
-                }
-            });
-            this._recordProc = null;
-        } else {
+
+        const proxy = this._getCompanionProxy();
+        if (!proxy) {
+            this._notifyError('OpenWispr companion service is unavailable.');
             this._resetState();
-        }
-    }
-
-    _processRecordingPipeline() {
-        this._trimSilence(this._outputFile, (processedPath) => {
-            this._transcribeAudio(processedPath, (transcript) => {
-                if (transcript === null) {
-                    this._resetState();
-                    return;
-                }
-
-                this._cleanupTranscript(transcript, (cleanedText) => {
-                    const finalText = (cleanedText ?? transcript ?? '').trim();
-                    this._debug(`Text: ${finalText}`);
-
-                    if (finalText) {
-                        this._notify(`Transcribed: ${finalText}`);
-                        this._injectText(finalText);
-                    } else {
-                        this._notify('No speech detected.');
-                    }
-
-                    this._resetState();
-                });
-            });
-        });
-    }
-
-    _trimSilence(inputPath, callback) {
-        if (!this._settings.get_boolean('silence-trim-enabled')) {
-            callback(inputPath);
             return;
         }
+        const payload = this._buildCompanionConfig();
+        const params = new GLib.Variant('(bs)', [Boolean(transcribe), payload]);
 
-        if (!GLib.file_test(this._ffmpegBinary, GLib.FileTest.EXISTS)) {
-            console.warn('[openwispr-gnome-extension] ffmpeg not found; skipping silence trim.');
-            callback(inputPath);
-            return;
-        }
-
-        const threshold = this._settings.get_string('silence-threshold') || '-35dB';
-        const duration = Math.max(0.05, this._settings.get_double('silence-duration'));
-        const filter = `silenceremove=start_periods=1:start_duration=${duration}:start_threshold=${threshold}:stop_periods=-1:stop_duration=${duration}:stop_threshold=${threshold}`;
-
-        this._runSubprocess(
-            [
-                this._ffmpegBinary,
-                '-y',
-                '-hide_banner',
-                '-loglevel',
-                'error',
-                '-i',
-                inputPath,
-                '-af',
-                filter,
-                this._trimmedOutputFile,
-            ],
-            (ok, _stdout, stderr) => {
-                if (!ok) {
-                    console.warn(`[openwispr-gnome-extension] ffmpeg trim failed; using original audio. ${stderr}`);
-                    callback(inputPath);
-                    return;
-                }
-
+        proxy.call(
+            'Stop',
+            params,
+            Gio.DBusCallFlags.NONE,
+            300000,
+            null,
+            (dbusProxy, res) => {
                 try {
-                    const trimmedFile = Gio.File.new_for_path(this._trimmedOutputFile);
-                    const info = trimmedFile.query_info('standard::size', Gio.FileQueryInfoFlags.NONE, null);
-                    if (info.get_size() > 0) {
-                        callback(this._trimmedOutputFile);
+                    const result = dbusProxy.call_finish(res);
+                    const [stopped, transcript] = result.deep_unpack();
+
+                    if (!stopped) {
+                        this._notifyError('Companion service could not stop recording.');
+                        this._resetState();
                         return;
                     }
-                } catch (e) {
-                    console.warn(`[openwispr-gnome-extension] Could not inspect trimmed audio file: ${e}`);
-                }
 
-                callback(inputPath);
-            }
-        );
-    }
+                    if (transcribe) {
+                        const finalText = (transcript || '').trim();
+                        this._debug(`Text: ${finalText}`);
 
-    _transcribeAudio(inputPath, callback) {
-        const provider = this._normalizeProvider(this._settings.get_string('stt-provider'));
-
-        if (provider === 'openai' || provider === 'groq') {
-            this._transcribeRemote(inputPath, provider, callback);
-            return;
-        }
-
-        this._transcribeLocal(inputPath, callback);
-    }
-
-    _transcribeLocal(inputPath, callback) {
-        this._debug('Transcribing with local whisper-cli...');
-
-        this._runSubprocess(
-            [
-                this._whisperBinary,
-                '-m',
-                this._modelPath,
-                '-f',
-                inputPath,
-                '-otxt',
-                '-np',
-                '-nt',
-            ],
-            (ok, _stdout, stderr) => {
-                if (!ok) {
-                    console.error(`[openwispr-gnome-extension] Local transcription failed: ${stderr}`);
-                    this._notifyError('Local transcription failed.');
-                    callback(null);
-                    return;
-                }
-
-                const txtPath = `${inputPath}.txt`;
-                const file = Gio.File.new_for_path(txtPath);
-
-                file.load_contents_async(null, (loadedFile, res) => {
-                    try {
-                        const [, contents] = loadedFile.load_contents_finish(res);
-                        const text = new TextDecoder().decode(contents).trim();
-                        callback(text);
-                    } catch (e) {
-                        console.error(`[openwispr-gnome-extension] Failed to read local output: ${e}`);
-                        callback(null);
+                        if (finalText) {
+                            this._notify(`Transcribed: ${finalText}`);
+                            this._injectText(finalText);
+                        } else {
+                            this._notify('No speech detected.');
+                        }
                     }
-                });
+                } catch (e) {
+                    console.error(`[openwispr-gnome-extension] Companion stop failed: ${e}`);
+                    this._notifyError('Companion transcription failed.');
+                    this._companionProxy = null;
+                }
+
+                this._resetState();
             }
         );
     }
 
-    _transcribeRemote(inputPath, provider, callback) {
-        if (!GLib.file_test(this._curlBinary, GLib.FileTest.EXISTS)) {
-            this._notifyError('curl is required for remote speech-to-text.');
-            callback(null);
-            return;
-        }
+    _getCompanionProxy() {
+        if (this._companionProxy)
+            return this._companionProxy;
 
-        const isOpenAI = provider === 'openai';
-        const endpoint = this._settings.get_string(isOpenAI ? 'stt-openai-endpoint' : 'stt-groq-endpoint');
-        const model = this._settings.get_string(isOpenAI ? 'stt-openai-model' : 'stt-groq-model');
-        const apiKey = this._settings.get_string(isOpenAI ? 'stt-openai-api-key' : 'stt-groq-api-key');
-
-        if (!apiKey) {
-            this._notifyError(`Missing API key for ${provider} speech-to-text.`);
-            callback(null);
-            return;
-        }
-
-        this._debug(`Transcribing with ${provider} endpoint...`);
-        this._runSubprocess(
-            [
-                this._curlBinary,
-                '-sS',
-                '-X',
-                'POST',
-                endpoint,
-                '-H',
-                `Authorization: Bearer ${apiKey}`,
-                '-F',
-                `model=${model}`,
-                '-F',
-                `file=@${inputPath}`,
-            ],
-            (ok, stdout, stderr) => {
-                if (!ok) {
-                    console.error(`[openwispr-gnome-extension] Remote transcription request failed: ${stderr}`);
-                    this._notifyError('Remote transcription request failed.');
-                    callback(null);
-                    return;
-                }
-
-                const text = this._extractRemoteTranscription(stdout);
-                if (!text) {
-                    console.error(`[openwispr-gnome-extension] Remote transcription response parse failed: ${stdout}`);
-                    this._notifyError('Remote transcription response was invalid.');
-                    callback(null);
-                    return;
-                }
-
-                callback(text);
-            }
-        );
-    }
-
-    _extractRemoteTranscription(stdout) {
         try {
-            const payload = JSON.parse(stdout);
-
-            if (typeof payload.text === 'string')
-                return payload.text.trim();
-
-            if (typeof payload.transcript === 'string')
-                return payload.transcript.trim();
-
-            if (payload.result && typeof payload.result.text === 'string')
-                return payload.result.text.trim();
+            this._companionProxy = Gio.DBusProxy.new_for_bus_sync(
+                Gio.BusType.SESSION,
+                Gio.DBusProxyFlags.NONE,
+                null,
+                COMPANION_BUS_NAME,
+                COMPANION_OBJECT_PATH,
+                COMPANION_INTERFACE,
+                null
+            );
+            return this._companionProxy;
         } catch (e) {
-            console.error(`[openwispr-gnome-extension] Failed to parse remote transcription JSON: ${e}`);
+            console.error(`[openwispr-gnome-extension] Failed to connect to companion DBus service: ${e}`);
+            this._companionProxy = null;
+            return null;
         }
-
-        return '';
     }
 
-    _cleanupTranscript(text, callback) {
-        if (!this._settings.get_boolean('llm-filter-enabled')) {
-            callback(text);
-            return;
-        }
-
-        if (!GLib.file_test(this._curlBinary, GLib.FileTest.EXISTS)) {
-            this._notifyError('curl is required for LLM cleanup.');
-            callback(text);
-            return;
-        }
-
-        const provider = this._normalizeProvider(this._settings.get_string('llm-provider'));
-        const isOpenAI = provider === 'openai';
-        const endpoint = this._settings.get_string(isOpenAI ? 'llm-openai-endpoint' : 'llm-groq-endpoint');
-        const model = this._settings.get_string(isOpenAI ? 'llm-openai-model' : 'llm-groq-model');
-        const apiKey = this._settings.get_string(isOpenAI ? 'llm-openai-api-key' : 'llm-groq-api-key');
-        const prompt = this._settings.get_string('llm-cleanup-prompt');
-
-        if (!apiKey) {
-            this._notifyError(`Missing API key for ${provider} LLM cleanup.`);
-            callback(text);
-            return;
-        }
+    _buildCompanionConfig() {
+        const sttProvider = this._normalizeProvider(this._settings.get_string('stt-provider'));
+        const llmProvider = this._normalizeProvider(this._settings.get_string('llm-provider'));
 
         const payload = {
-            model,
-            temperature: 0,
-            messages: [
-                { role: 'system', content: prompt },
-                { role: 'user', content: text },
-            ],
+            modelPath: this._modelPath,
+            silenceTrimEnabled: this._settings.get_boolean('silence-trim-enabled'),
+            silenceThreshold: this._settings.get_string('silence-threshold') || '-35dB',
+            silenceDuration: this._settings.get_double('silence-duration'),
+            sttProvider,
+            sttOpenAIEndpoint: this._settings.get_string('stt-openai-endpoint'),
+            sttOpenAIModel: this._settings.get_string('stt-openai-model'),
+            sttOpenAIApiKey: this._settings.get_string('stt-openai-api-key'),
+            sttGroqEndpoint: this._settings.get_string('stt-groq-endpoint'),
+            sttGroqModel: this._settings.get_string('stt-groq-model'),
+            sttGroqApiKey: this._settings.get_string('stt-groq-api-key'),
+            llmFilterEnabled: this._settings.get_boolean('llm-filter-enabled'),
+            llmProvider,
+            llmOpenAIEndpoint: this._settings.get_string('llm-openai-endpoint'),
+            llmOpenAIModel: this._settings.get_string('llm-openai-model'),
+            llmOpenAIApiKey: this._settings.get_string('llm-openai-api-key'),
+            llmGroqEndpoint: this._settings.get_string('llm-groq-endpoint'),
+            llmGroqModel: this._settings.get_string('llm-groq-model'),
+            llmGroqApiKey: this._settings.get_string('llm-groq-api-key'),
+            llmCleanupPrompt: this._settings.get_string('llm-cleanup-prompt'),
         };
 
-        this._runSubprocess(
-            [
-                this._curlBinary,
-                '-sS',
-                '-X',
-                'POST',
-                endpoint,
-                '-H',
-                'Content-Type: application/json',
-                '-H',
-                `Authorization: Bearer ${apiKey}`,
-                '-d',
-                JSON.stringify(payload),
-            ],
-            (ok, stdout, stderr) => {
-                if (!ok) {
-                    console.error(`[openwispr-gnome-extension] LLM cleanup request failed: ${stderr}`);
-                    callback(text);
-                    return;
-                }
-
-                const cleaned = this._extractLlmText(stdout);
-                callback(cleaned || text);
-            }
-        );
-    }
-
-    _extractLlmText(stdout) {
-        try {
-            const payload = JSON.parse(stdout);
-
-            if (typeof payload.output_text === 'string')
-                return payload.output_text.trim();
-
-            const choice = payload.choices?.[0];
-            const message = choice?.message?.content;
-
-            if (typeof message === 'string')
-                return message.trim();
-
-            if (Array.isArray(message)) {
-                return message
-                    .map(part => (typeof part?.text === 'string' ? part.text : ''))
-                    .join('')
-                    .trim();
-            }
-        } catch (e) {
-            console.error(`[openwispr-gnome-extension] Failed to parse LLM response JSON: ${e}`);
-        }
-
-        return '';
-    }
-
-    _runSubprocess(argv, callback) {
-        try {
-            const proc = new Gio.Subprocess({
-                argv,
-                flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE,
-            });
-            proc.init(null);
-
-            proc.communicate_utf8_async(null, null, (subproc, res) => {
-                try {
-                    const [, stdout, stderr] = subproc.communicate_utf8_finish(res);
-                    callback(subproc.get_successful(), stdout, stderr);
-                } catch (e) {
-                    callback(false, '', `${e}`);
-                }
-            });
-        } catch (e) {
-            callback(false, '', `${e}`);
-        }
+        return JSON.stringify(payload);
     }
 
     _normalizeProvider(provider) {
@@ -904,7 +677,6 @@ class OpenWisprController {
         this._processing = false;
         this._recordingTrigger = null;
         this._remoteHoldBinding = null;
-        this._recordProc = null;
         if (this._icon) {
             this._icon.icon_name = 'microphone-sensitivity-high-symbolic';
             this._icon.style_class = 'system-status-icon';

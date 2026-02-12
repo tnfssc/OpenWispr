@@ -24,7 +24,7 @@ jobs:
           cache: true
 
       - name: Install packaging tools
-        run: sudo apt-get update && sudo apt-get install -y libglib2.0-bin jq zip rsync
+        run: sudo apt-get update && sudo apt-get install -y jq zip rsync
 
       - name: Build extension zip
         id: build
@@ -56,10 +56,6 @@ jobs:
             --exclude 'models/' \
             --exclude 'schemas/gschemas.compiled' \
             "$EXT_DIR/" "$STAGE_DIR/"
-
-          if [[ -d "$STAGE_DIR/schemas" ]] && compgen -G "$STAGE_DIR/schemas/*.gschema.xml" > /dev/null; then
-            glib-compile-schemas "$STAGE_DIR/schemas"
-          fi
 
           if [[ ! -f "$STAGE_DIR/metadata.json" || ! -f "$STAGE_DIR/extension.js" ]]; then
             echo "Package is missing required extension files"
