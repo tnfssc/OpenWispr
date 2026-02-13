@@ -204,6 +204,8 @@ func runPortalDaemon(ctx context.Context, conn *dbus.Conn, client *extensionClie
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-conn.Context().Done():
+			return errors.New("session bus connection closed")
 		case sig := <-signalCh:
 			if sig == nil {
 				continue
