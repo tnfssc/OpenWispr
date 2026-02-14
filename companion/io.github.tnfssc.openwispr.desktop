@@ -3,6 +3,7 @@ Type=Application
 Name=OpenWispr Companion
 Comment=OpenWispr portal companion registration entry
 Exec=openwispr
+Icon=io.github.tnfssc.openwispr
 Terminal=false
 NoDisplay=true
 Categories=Utility;

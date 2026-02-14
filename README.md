@@ -2,6 +2,8 @@
 
 [![Gnome Extensions](https://img.shields.io/badge/Install-Now-4a86cf?style=for-the-badge&logo=gnome)](https://extensions.gnome.org/extension/9314/openwispr-gnome-extension/)
 
+<img width="160" alt="openwispr logo" src="./logo.png" />
+
 **openwispr-gnome-extension** is an AI-powered voice-to-text dictation extension for GNOME Shell. It leverages local AI models (via `whisper-cli`) to provide private, fast, and accurate speech recognition directly into any application.
 
 <img width="429" height="255" alt="screenshot" src="https://github.com/user-attachments/assets/6a1856a2-228f-434a-8319-5386ec1b4cf0" />
@@ -93,7 +95,7 @@ esac
 REPO="https://github.com/tnfssc/openwispr-gnome-extension/releases/latest/download"
 TMP="$(mktemp -d)"
 
-mkdir -p ~/.local/bin ~/.config/systemd/user ~/.local/share/applications
+mkdir -p ~/.local/bin ~/.config/systemd/user ~/.local/share/applications ~/.local/share/icons/hicolor/256x256/apps
 curl -fsSL "$REPO/${BIN}.tar.gz" -o "$TMP/${BIN}.tar.gz"
 tar -xzf "$TMP/${BIN}.tar.gz" -C "$TMP"
 install -Dm755 "$TMP/$BIN" ~/.local/bin/openwispr
@@ -101,6 +103,7 @@ install -Dm755 "$TMP/$BIN" ~/.local/bin/openwispr
 curl -fsSL "$REPO/openwispr-engine.service" -o ~/.config/systemd/user/openwispr-engine.service
 curl -fsSL "$REPO/openwispr-hotkeyd.service" -o ~/.config/systemd/user/openwispr-hotkeyd.service
 curl -fsSL "$REPO/io.github.tnfssc.openwispr.desktop" -o ~/.local/share/applications/io.github.tnfssc.openwispr.desktop
+curl -fsSL "$REPO/logo.png" -o ~/.local/share/icons/hicolor/256x256/apps/io.github.tnfssc.openwispr.png
 
 systemctl --user daemon-reload
 systemctl --user enable --now openwispr-engine.service
@@ -169,6 +172,8 @@ cp companion/openwispr-engine.service ~/.config/systemd/user/
 cp companion/openwispr-hotkeyd.service ~/.config/systemd/user/
 mkdir -p ~/.local/share/applications
 cp companion/io.github.tnfssc.openwispr.desktop ~/.local/share/applications/
+mkdir -p ~/.local/share/icons/hicolor/256x256/apps
+cp logo.png ~/.local/share/icons/hicolor/256x256/apps/io.github.tnfssc.openwispr.png
 systemctl --user daemon-reload
 systemctl --user enable --now openwispr-engine.service
 systemctl --user enable --now openwispr-hotkeyd.service

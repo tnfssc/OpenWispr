@@ -16,6 +16,7 @@ const DBUS_CONTROL_PATH = '/org/gnome/Shell/Extensions/OpenWispr';
 const COMPANION_BUS_NAME = 'io.github.tnfssc.OpenWispr.Recorder';
 const COMPANION_OBJECT_PATH = '/io/github/tnfssc/OpenWispr/Recorder';
 const COMPANION_INTERFACE = 'io.github.tnfssc.OpenWispr.Recorder';
+const LOGO_FILENAME = 'logo.png';
 const DBUS_CONTROL_IFACE = `
 <node>
   <interface name="org.gnome.Shell.Extensions.OpenWispr">
@@ -71,13 +72,17 @@ class OpenWisprController {
 
         // resolve paths relative to extension dir
         this._modelPath = this.dir.get_child('models').get_child('ggml-base.en.bin').get_path();
+        this._idleIconGicon = null;
+        const logoFile = this.dir.get_child(LOGO_FILENAME);
+        if (logoFile.query_exists(null))
+            this._idleIconGicon = new Gio.FileIcon({ file: logoFile });
 
         // UI: Panel Indicator
         this._indicator = new PanelMenu.Button(0.0, this.metadata.name, false);
         this._icon = new St.Icon({
-            icon_name: 'microphone-sensitivity-high-symbolic',
             style_class: 'system-status-icon',
         });
+        this._setIdleIcon();
         this._indicator.add_child(this._icon);
         
         // Click to toggle
@@ -215,6 +220,7 @@ class OpenWisprController {
 
         this._dbusConn = null;
         this._companionProxy = null;
+        this._idleIconGicon = null;
 
         Main.wm.removeKeybinding('toggle-recording');
         this._settings = null;
@@ -479,6 +485,7 @@ class OpenWisprController {
         this._debug(`Starting recording (${trigger})...`);
         this._recording = true;
         this._recordingTrigger = trigger;
+        this._icon.gicon = null;
         this._icon.icon_name = 'media-record-symbolic';
         this._icon.style_class = 'system-status-icon destructive-action'; // Red-ish if theme supports
 
@@ -495,6 +502,7 @@ class OpenWisprController {
 
         this._recording = false;
         this._processing = true;
+        this._icon.gicon = null;
         this._icon.icon_name = 'process-working-symbolic'; // Spinner
 
         const proxy = this._getCompanionProxy();
@@ -677,8 +685,18 @@ class OpenWisprController {
         this._processing = false;
         this._recordingTrigger = null;
         this._remoteHoldBinding = null;
+        this._setIdleIcon();
+    }
+
+    _setIdleIcon() {
         if (this._icon) {
-            this._icon.icon_name = 'microphone-sensitivity-high-symbolic';
+            if (this._idleIconGicon) {
+                this._icon.gicon = this._idleIconGicon;
+                this._icon.icon_name = null;
+            } else {
+                this._icon.gicon = null;
+                this._icon.icon_name = 'microphone-sensitivity-high-symbolic';
+            }
             this._icon.style_class = 'system-status-icon';
         }
     }

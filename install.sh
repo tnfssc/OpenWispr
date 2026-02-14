@@ -31,6 +31,9 @@ if which go >/dev/null; then
     mkdir -p "$HOME/.local/share/applications"
     cp "$(pwd)/companion/io.github.tnfssc.openwispr.desktop" "$HOME/.local/share/applications/io.github.tnfssc.openwispr.desktop"
 
+    mkdir -p "$HOME/.local/share/icons/hicolor/256x256/apps"
+    cp "$(pwd)/logo.png" "$HOME/.local/share/icons/hicolor/256x256/apps/io.github.tnfssc.openwispr.png"
+
     systemctl --user daemon-reload >/dev/null 2>&1 || true
     systemctl --user enable --now openwispr-engine.service >/dev/null 2>&1 || true
 else
