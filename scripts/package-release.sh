@@ -8,8 +8,13 @@ ARCH="$(uname -m)"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
 APP_BUNDLE_PATH="$DIST_DIR/${APP_NAME}.app"
-ZIP_NAME="${APP_NAME}-${TAG}-macos-${ARCH}.zip"
-ZIP_PATH="$DIST_DIR/$ZIP_NAME"
+DMG_NAME="${APP_NAME}-${TAG}-macos-${ARCH}.dmg"
+DMG_PATH="$DIST_DIR/$DMG_NAME"
+DMG_STAGING_DIR="$DIST_DIR/.dmg-staging"
+ICON_SOURCE="$ROOT_DIR/openwispr.png"
+ICONSET_DIR="$DIST_DIR/.AppIcon.iconset"
+ICON_FILE_NAME="AppIcon.icns"
+CHECKSUM_PATH="$DMG_PATH.sha256"
 
 BUNDLE_VERSION="${TAG#v}"
 if [[ ! "$BUNDLE_VERSION" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
@@ -25,12 +30,30 @@ if [[ ! -x "$BIN_PATH" ]]; then
   exit 1
 fi
 
+if [[ ! -f "$ICON_SOURCE" ]]; then
+  echo "missing icon source: $ICON_SOURCE" >&2
+  exit 1
+fi
+
 echo "[package] creating app bundle"
 rm -rf "$APP_BUNDLE_PATH"
-mkdir -p "$APP_BUNDLE_PATH/Contents/MacOS"
+mkdir -p "$APP_BUNDLE_PATH/Contents/MacOS" "$APP_BUNDLE_PATH/Contents/Resources"
 
 cp "$BIN_PATH" "$APP_BUNDLE_PATH/Contents/MacOS/$APP_NAME"
 chmod +x "$APP_BUNDLE_PATH/Contents/MacOS/$APP_NAME"
+
+echo "[package] generating app icon"
+rm -rf "$ICONSET_DIR"
+mkdir -p "$ICONSET_DIR"
+
+for size in 16 32 128 256 512; do
+  sips -s format png -z "$size" "$size" "$ICON_SOURCE" --out "$ICONSET_DIR/icon_${size}x${size}.png" >/dev/null
+  doubled_size="$((size * 2))"
+  sips -s format png -z "$doubled_size" "$doubled_size" "$ICON_SOURCE" --out "$ICONSET_DIR/icon_${size}x${size}@2x.png" >/dev/null
+done
+
+iconutil -c icns "$ICONSET_DIR" -o "$APP_BUNDLE_PATH/Contents/Resources/$ICON_FILE_NAME"
+rm -rf "$ICONSET_DIR"
 
 cat > "$APP_BUNDLE_PATH/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -45,6 +68,8 @@ cat > "$APP_BUNDLE_PATH/Contents/Info.plist" <<EOF
   <string>OpenWispr</string>
   <key>CFBundleIdentifier</key>
   <string>io.github.tnfssc.openwispr</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
@@ -61,12 +86,19 @@ cat > "$APP_BUNDLE_PATH/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
-echo "[package] zipping app bundle"
+echo "[package] building dmg"
 mkdir -p "$DIST_DIR"
-rm -f "$ZIP_PATH" "$ZIP_PATH.sha256"
-ditto -c -k --sequesterRsrc --keepParent "$APP_BUNDLE_PATH" "$ZIP_PATH"
-shasum -a 256 "$ZIP_PATH" > "$ZIP_PATH.sha256"
+rm -rf "$DMG_STAGING_DIR"
+mkdir -p "$DMG_STAGING_DIR"
+
+cp -R "$APP_BUNDLE_PATH" "$DMG_STAGING_DIR/"
+ln -s /Applications "$DMG_STAGING_DIR/Applications"
+
+rm -f "$DMG_PATH" "$CHECKSUM_PATH"
+hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_STAGING_DIR" -ov -format UDZO "$DMG_PATH" >/dev/null
+shasum -a 256 "$DMG_PATH" > "$CHECKSUM_PATH"
+rm -rf "$DMG_STAGING_DIR"
 
 echo "[package] created artifact"
-echo "  $ZIP_PATH"
-echo "  $ZIP_PATH.sha256"
+echo "  $DMG_PATH"
+echo "  $CHECKSUM_PATH"

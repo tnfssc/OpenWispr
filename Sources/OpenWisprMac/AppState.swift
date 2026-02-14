@@ -77,6 +77,21 @@ final class AppState: ObservableObject {
     return false
   }
 
+  var lastTranscriptPreview: String {
+    let collapsed =
+      lastTranscript
+      .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+
+    let maxLength = 220
+    guard collapsed.count > maxLength else {
+      return collapsed
+    }
+
+    let endIndex = collapsed.index(collapsed.startIndex, offsetBy: maxLength)
+    return String(collapsed[..<endIndex]) + "..."
+  }
+
   var startAtLoginSupported: Bool {
     startAtLogin.isSupported
   }

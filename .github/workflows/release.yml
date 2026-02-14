@@ -26,7 +26,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: OpenWispr-${{ github.ref_name }}
-          path: dist/*
+          path: |
+            dist/*.dmg
+            dist/*.dmg.sha256
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
@@ -34,5 +36,5 @@ jobs:
           tag_name: ${{ github.ref_name }}
           generate_release_notes: true
           files: |
-            dist/*.zip
-            dist/*.sha256
+            dist/*.dmg
+            dist/*.dmg.sha256

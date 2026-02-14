@@ -26,14 +26,32 @@ struct MenuBarContentView: View {
       .disabled(appState.isProcessing)
 
       if !appState.lastTranscript.isEmpty {
-        Text("Last transcript")
-          .font(.caption)
-          .foregroundStyle(.secondary)
+        HStack {
+          Text("Last transcript")
+            .font(.caption)
+            .foregroundStyle(.secondary)
 
-        Text(appState.lastTranscript)
-          .lineLimit(4)
+          Spacer()
+
+          Button("Copy") {
+            PasteInjector.copyToClipboard(appState.lastTranscript)
+          }
+          .buttonStyle(.plain)
+          .font(.caption)
+        }
+
+        Text(appState.lastTranscriptPreview)
+          .lineLimit(3)
+          .truncationMode(.tail)
+          .fixedSize(horizontal: false, vertical: true)
           .textSelection(.enabled)
           .font(.system(size: 12))
+
+        if appState.lastTranscriptPreview != appState.lastTranscript {
+          Text("Preview truncated")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
       }
 
       if !appState.lastError.isEmpty {

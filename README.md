@@ -58,7 +58,7 @@ For local STT, point `Local Model Path` to a valid Whisper model file, for examp
 
 ## Packaging
 
-Create an unsigned `.app` zip locally:
+Create an unsigned drag-and-drop `.dmg` locally:
 
 ```bash
 ./scripts/package-release.sh v0.1.0
@@ -66,8 +66,10 @@ Create an unsigned `.app` zip locally:
 
 Artifacts are written to `dist/`:
 
-- `OpenWispr-<tag>-macos-<arch>.zip`
-- `OpenWispr-<tag>-macos-<arch>.zip.sha256`
+- `OpenWispr-<tag>-macos-<arch>.dmg`
+- `OpenWispr-<tag>-macos-<arch>.dmg.sha256`
+
+The app icon is generated from `openwispr.png` during packaging.
 
 This package is intentionally unsigned for now.
 
@@ -77,7 +79,7 @@ Pushing any git tag triggers `.github/workflows/release.yml`, which will:
 
 - build the release package
 - upload it as a workflow artifact
-- create/update a GitHub Release for that tag with the zip + checksum attached
+- create/update a GitHub Release for that tag with the dmg + checksum attached
 
 ## Tests and Linting
 
