@@ -16,7 +16,7 @@ const DBUS_CONTROL_PATH = '/org/gnome/Shell/Extensions/OpenWispr';
 const COMPANION_BUS_NAME = 'io.github.tnfssc.OpenWispr.Recorder';
 const COMPANION_OBJECT_PATH = '/io/github/tnfssc/OpenWispr/Recorder';
 const COMPANION_INTERFACE = 'io.github.tnfssc.OpenWispr.Recorder';
-const LOGO_FILENAME = 'logo.png';
+const PANEL_ICON_FILENAME = 'openwispr-wave-symbolic.svg';
 const DBUS_CONTROL_IFACE = `
 <node>
   <interface name="org.gnome.Shell.Extensions.OpenWispr">
@@ -73,9 +73,9 @@ class OpenWisprController {
         // resolve paths relative to extension dir
         this._modelPath = this.dir.get_child('models').get_child('ggml-base.en.bin').get_path();
         this._idleIconGicon = null;
-        const logoFile = this.dir.get_child(LOGO_FILENAME);
-        if (logoFile.query_exists(null))
-            this._idleIconGicon = new Gio.FileIcon({ file: logoFile });
+        const panelIconFile = this.dir.get_child(PANEL_ICON_FILENAME);
+        if (panelIconFile.query_exists(null))
+            this._idleIconGicon = new Gio.FileIcon({ file: panelIconFile });
 
         // UI: Panel Indicator
         this._indicator = new PanelMenu.Button(0.0, this.metadata.name, false);
