@@ -1,8 +1,10 @@
 # OpenWispr
 
+A native macOS menu bar dictation app inspired by the Linux `openwispr-gnome-extension` flow.
+
 ![OpenWispr](./openwispr.png)
 
-A native macOS menu bar dictation app inspired by the Linux `openwispr-gnome-extension` flow.
+![screenshot](https://github.com/user-attachments/assets/3290108e-621f-4c78-9ace-d1c385de779d)
 
 ## What it does
 
