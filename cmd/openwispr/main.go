@@ -36,7 +36,7 @@ const (
 	extensionsPath         = dbus.ObjectPath("/org/gnome/Shell/Extensions")
 	extensionsInterface    = "org.gnome.Shell.Extensions"
 
-	defaultPortalTrigger = "Alt_R"
+	defaultPortalTrigger = "<Super>z"
 	defaultEvdevDevice   = "/dev/input/by-path/platform-i8042-serio-0-event-kbd"
 	shortcutID           = "openwispr-hold"
 	portalAppID          = "io.github.tnfssc.openwispr"
@@ -131,7 +131,7 @@ func runDaemon(args []string, conn *dbus.Conn, client *extensionClient) error {
 	backend := fs.String("backend", "auto", "daemon backend: auto|portal|evdev")
 	trigger := fs.String("trigger", defaultPortalTrigger, "portal preferred trigger (shortcuts spec format)")
 	device := fs.String("device", defaultEvdevDevice, "evdev keyboard device path")
-	key := fs.String("evdev-key", "rightalt", "evdev key: rightalt|leftalt")
+	key := fs.String("evdev-key", "z", "evdev key: z|capslock|rightalt|leftalt")
 	_ = fs.Parse(args)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -691,7 +691,7 @@ func readUint32Property(obj dbus.BusObject, iface, property string) (uint32, err
 }
 
 func usage() {
-	fmt.Println(`openwispr companion CLI
+	fmt.Print(`openwispr companion CLI
 
 Usage:
   openwispr toggle
@@ -700,7 +700,7 @@ Usage:
   openwispr status
   openwispr doctor
   openwispr restart [--no-extension-reload]
-  openwispr daemon [--backend auto|portal|evdev] [--trigger Alt_R] [--device /dev/input/... ] [--evdev-key rightalt]
+  openwispr daemon [--backend auto|portal|evdev] [--trigger <Super>z] [--device /dev/input/... ] [--evdev-key z]
   openwispr engine
 `)
 }

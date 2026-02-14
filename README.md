@@ -146,7 +146,7 @@ The extension now talks to the companion engine over D-Bus for recording/transcr
 systemctl --user enable --now openwispr-engine.service
 ```
 
-### Hold Daemon (Right Alt)
+### Hold Daemon (Super + Z)
 
 For more reliable hold-to-talk behavior, use the companion daemon:
 
@@ -157,12 +157,12 @@ systemctl --user enable --now openwispr-hotkeyd.service
 The default service runs:
 
 ```bash
-openwispr daemon --backend auto --trigger Alt_R --evdev-key rightalt
+openwispr daemon --backend auto --trigger <Super>z --evdev-key z
 ```
 
 `auto` tries the portal backend first, then falls back to evdev if needed.
 
-On some GNOME setups, modifier-only triggers such as `Alt_R` may emit `Activated` without `Deactivated`; the companion daemon handles this by treating the next `Activated` as release.
+If you switch to modifier-only triggers (like `Alt_R`) and release detection is unreliable, GNOME may emit `Activated` without `Deactivated`.
 
 To install/update the service manually:
 
@@ -184,7 +184,7 @@ The desktop entry is required so GNOME GlobalShortcuts can associate a valid app
 Portal-only test run:
 
 ```bash
-openwispr daemon --backend portal --trigger Alt_R
+openwispr daemon --backend portal --trigger <Super>z
 ```
 
 If `openwispr doctor` reports missing `org.freedesktop.portal.GlobalShortcuts`, start the GNOME portal backend and restart the daemon:
@@ -248,6 +248,35 @@ Remote STT and LLM keys/endpoints are configurable in extension preferences. Rel
 *   **STT**: `stt-provider`, `stt-openai-*`, `stt-groq-*`
 *   **LLM**: `llm-filter-enabled`, `llm-provider`, `llm-openai-*`, `llm-groq-*`, `llm-cleanup-prompt`
 *   **FFmpeg**: `silence-trim-enabled`, `silence-threshold`, `silence-duration`
+
+## Testing
+
+LLM cleanup unit tests (request payload + response parsing):
+
+```bash
+go test ./cmd/openwispr
+```
+
+Optional live LLM cleanup tests (requires explicit env vars and network access):
+
+```bash
+OPENWISPR_TEST_OPENAI_ENDPOINT="https://api.openai.com/v1/chat/completions" \
+OPENWISPR_TEST_OPENAI_MODEL="gpt-4o-mini" \
+OPENWISPR_TEST_OPENAI_API_KEY="..." \
+OPENWISPR_TEST_GROQ_ENDPOINT="https://api.groq.com/openai/v1/chat/completions" \
+OPENWISPR_TEST_GROQ_MODEL="llama-3.1-8b-instant" \
+OPENWISPR_TEST_GROQ_API_KEY="..." \
+go test -tags=integration ./cmd/openwispr -run TestLiveCleanupTranscript -v
+```
+
+Live prompt benchmark against Groq (compares multiple prompt candidates and prints outputs/scores):
+
+```bash
+OPENWISPR_TEST_GROQ_ENDPOINT="https://api.groq.com/openai/v1/chat/completions" \
+OPENWISPR_TEST_GROQ_MODEL="openai/gpt-oss-120b" \
+OPENWISPR_TEST_GROQ_API_KEY="..." \
+go test -tags=integration ./cmd/openwispr -run TestLivePromptBenchmarkGroq -v
+```
 
 ## License
 

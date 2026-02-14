@@ -2,6 +2,7 @@
 *.bin
 extension/models/*.bin
 models/*.bin
+*.env*
 
 # Logs and temp files
 *.log

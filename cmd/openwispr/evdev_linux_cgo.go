@@ -77,6 +77,10 @@ func runEvdevDaemon(ctx context.Context, client *extensionClient, devicePath, ke
 
 func resolveEvdevKey(name string) (uint16, error) {
 	switch strings.ToLower(name) {
+	case "z", "key_z":
+		return evdev.KEY_Z, nil
+	case "capslock", "caps_lock", "caps":
+		return evdev.KEY_CAPSLOCK, nil
 	case "rightalt", "alt_r", "ralt", "altgr":
 		return evdev.KEY_RIGHTALT, nil
 	case "leftalt", "alt_l", "lalt":
