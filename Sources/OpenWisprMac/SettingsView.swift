@@ -135,7 +135,7 @@ struct SettingsView: View {
           }
 
           LabeledContent("Model") {
-            TextField("whisper-large-v3-turbo", text: $settings.sttGroqModel)
+            TextField("whisper-large-v3", text: $settings.sttGroqModel)
               .multilineTextAlignment(.trailing)
               .textFieldStyle(.roundedBorder)
               .frame(width: 220)

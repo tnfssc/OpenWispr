@@ -182,7 +182,7 @@ final class SettingsStore: ObservableObject {
     notificationsEnabled = defaults.object(forKey: "notificationsEnabled") as? Bool ?? true
     startAtLoginEnabled = defaults.object(forKey: "startAtLoginEnabled") as? Bool ?? false
 
-    silenceTrimEnabled = defaults.object(forKey: "silenceTrimEnabled") as? Bool ?? true
+    silenceTrimEnabled = defaults.object(forKey: "silenceTrimEnabled") as? Bool ?? false
     silenceThreshold = defaults.string(forKey: "silenceThreshold") ?? "-35dB"
     silenceDuration = defaults.object(forKey: "silenceDuration") as? Double ?? 0.25
 
@@ -201,7 +201,7 @@ final class SettingsStore: ObservableObject {
     sttGroqEndpoint =
       defaults.string(forKey: "sttGroqEndpoint")
       ?? "https://api.groq.com/openai/v1/audio/transcriptions"
-    sttGroqModel = defaults.string(forKey: "sttGroqModel") ?? "whisper-large-v3-turbo"
+    sttGroqModel = defaults.string(forKey: "sttGroqModel") ?? "whisper-large-v3"
     sttGroqApiKey = defaults.string(forKey: "sttGroqApiKey") ?? ""
 
     llmFilterEnabled = defaults.object(forKey: "llmFilterEnabled") as? Bool ?? false

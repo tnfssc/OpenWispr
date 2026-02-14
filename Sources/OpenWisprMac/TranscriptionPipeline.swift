@@ -6,6 +6,7 @@ enum PipelineError: LocalizedError {
   case invalidURL(String)
   case emptyResponse(String)
   case missingCredentials(String)
+  case remoteHTTP(provider: String, code: Int, detail: String)
 
   var errorDescription: String? {
     switch self {
@@ -13,7 +14,12 @@ enum PipelineError: LocalizedError {
       .invalidURL(let value),
       .emptyResponse(let value),
       .missingCredentials(let value):
-      value
+      return value
+    case .remoteHTTP(let provider, let code, let detail):
+      if detail.isEmpty {
+        return "\(provider) STT request failed with HTTP \(code)"
+      }
+      return "\(provider) STT request failed with HTTP \(code): \(detail)"
     }
   }
 }
@@ -114,25 +120,55 @@ struct TranscriptionPipeline {
     case .local:
       return try await transcribeLocal(inputURL: inputURL, settings: settings)
     case .openai:
-      guard !settings.sttOpenAIApiKey.isEmpty else {
+      let endpoint = settings.sttOpenAIEndpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+      let model = settings.sttOpenAIModel.trimmingCharacters(in: .whitespacesAndNewlines)
+      let apiKey = settings.sttOpenAIApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+
+      guard !apiKey.isEmpty else {
         throw PipelineError.missingCredentials("Missing OpenAI STT API key")
       }
+
       return try await transcribeRemote(
         inputURL: inputURL,
-        endpoint: settings.sttOpenAIEndpoint,
-        model: settings.sttOpenAIModel,
-        apiKey: settings.sttOpenAIApiKey
+        endpoint: endpoint,
+        model: model,
+        apiKey: apiKey,
+        providerName: "OpenAI"
       )
     case .groq:
-      guard !settings.sttGroqApiKey.isEmpty else {
+      let endpoint = settings.sttGroqEndpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+      let model = settings.sttGroqModel.trimmingCharacters(in: .whitespacesAndNewlines)
+      let apiKey = settings.sttGroqApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+
+      guard !apiKey.isEmpty else {
         throw PipelineError.missingCredentials("Missing Groq STT API key")
       }
-      return try await transcribeRemote(
-        inputURL: inputURL,
-        endpoint: settings.sttGroqEndpoint,
-        model: settings.sttGroqModel,
-        apiKey: settings.sttGroqApiKey
-      )
+
+      do {
+        return try await transcribeRemote(
+          inputURL: inputURL,
+          endpoint: endpoint,
+          model: model,
+          apiKey: apiKey,
+          providerName: "Groq"
+        )
+      } catch let error as PipelineError {
+        if model == "whisper-large-v3-turbo",
+          case .remoteHTTP(let provider, let code, _) = error,
+          provider == "Groq",
+          code == 400
+        {
+          return try await transcribeRemote(
+            inputURL: inputURL,
+            endpoint: endpoint,
+            model: "whisper-large-v3",
+            apiKey: apiKey,
+            providerName: "Groq"
+          )
+        }
+
+        throw error
+      }
     }
   }
 
@@ -167,9 +203,19 @@ struct TranscriptionPipeline {
     return transcript.trimmingCharacters(in: .whitespacesAndNewlines)
   }
 
-  private func transcribeRemote(inputURL: URL, endpoint: String, model: String, apiKey: String)
+  private func transcribeRemote(
+    inputURL: URL,
+    endpoint: String,
+    model: String,
+    apiKey: String,
+    providerName: String
+  )
     async throws -> String
   {
+    guard !model.isEmpty else {
+      throw PipelineError.emptyResponse("Missing STT model")
+    }
+
     guard let url = URL(string: endpoint) else {
       throw PipelineError.invalidURL("Invalid STT endpoint: \(endpoint)")
     }
@@ -189,7 +235,16 @@ struct TranscriptionPipeline {
       throw PipelineError.emptyResponse("No HTTP response from STT provider")
     }
     guard (200..<300).contains(http.statusCode) else {
-      throw PipelineError.emptyResponse("STT request failed with HTTP \(http.statusCode)")
+      let responseText =
+        String(data: data, encoding: .utf8)?.trimmingCharacters(
+          in: .whitespacesAndNewlines
+        ) ?? ""
+
+      throw PipelineError.remoteHTTP(
+        provider: providerName,
+        code: http.statusCode,
+        detail: responseText
+      )
     }
 
     if let transcript = TranscriptParser.parseSTTResponse(data: data) {
@@ -266,7 +321,7 @@ struct TranscriptionPipeline {
     body.append(
       "Content-Disposition: form-data; name=\"file\"; filename=\"\(fileURL.lastPathComponent)\"\r\n"
         .data(using: .utf8)!)
-    body.append("Content-Type: audio/wav\r\n\r\n".data(using: .utf8)!)
+    body.append("Content-Type: application/octet-stream\r\n\r\n".data(using: .utf8)!)
     body.append(fileData)
     body.append("\r\n".data(using: .utf8)!)
 

@@ -20,16 +20,25 @@ private struct RegisteredHotkeyCallback {
   let onRelease: () -> Void
 }
 
+private struct RightOptionCallback {
+  let onTap: () -> Void
+  let onHoldStart: () -> Void
+  let onHoldStop: () -> Void
+}
+
 final class HotkeyManager {
   private var eventHandler: EventHandlerRef?
   private var toggleHotkeyRef: EventHotKeyRef?
   private var holdHotkeyRef: EventHotKeyRef?
   private var rightOptionGlobalMonitor: Any?
   private var rightOptionLocalMonitor: Any?
-  private var rightOptionCallback: RegisteredHotkeyCallback?
+  private var rightOptionCallback: RightOptionCallback?
   private var isRightOptionDown = false
+  private var isRightOptionHoldActive = false
+  private var rightOptionHoldWorkItem: DispatchWorkItem?
   private var callbacks: [UInt32: RegisteredHotkeyCallback] = [:]
   private var nextHotkeyID: UInt32 = 1
+  private let rightOptionHoldThreshold: TimeInterval = 0.2
 
   init() {
     installEventHandler()
@@ -68,7 +77,13 @@ final class HotkeyManager {
       )
 
       if isRightOptionShortcut(holdShortcut) {
-        try registerRightOptionHold(callback: callback)
+        try registerRightOptionHold(
+          callback: RightOptionCallback(
+            onTap: onToggle,
+            onHoldStart: onHoldStart,
+            onHoldStop: onHoldStop
+          )
+        )
       } else {
         holdHotkeyRef = try registerHotkey(
           shortcut: holdShortcut,
@@ -167,18 +182,28 @@ final class HotkeyManager {
     return hotKeyRef
   }
 
-  private func registerRightOptionHold(callback: RegisteredHotkeyCallback) throws {
+  private func registerRightOptionHold(callback: RightOptionCallback) throws {
     rightOptionCallback = callback
     isRightOptionDown = false
+    isRightOptionHoldActive = false
+    rightOptionHoldWorkItem = nil
 
     rightOptionGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) {
       [weak self] event in
-      self?.handleRightOptionEvent(event)
+      self?.handleRightOptionEvent(
+        type: event.type,
+        keyCode: event.keyCode,
+        flagsRawValue: event.modifierFlags.rawValue
+      )
     }
 
     rightOptionLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) {
       [weak self] event in
-      self?.handleRightOptionEvent(event)
+      self?.handleRightOptionEvent(
+        type: event.type,
+        keyCode: event.keyCode,
+        flagsRawValue: event.modifierFlags.rawValue
+      )
       return event
     }
 
@@ -189,23 +214,47 @@ final class HotkeyManager {
     }
   }
 
-  private func handleRightOptionEvent(_ event: NSEvent) {
-    guard event.type == .flagsChanged else {
+  private func handleRightOptionEvent(
+    type: NSEvent.EventType,
+    keyCode: UInt16,
+    flagsRawValue: NSEvent.ModifierFlags.RawValue
+  ) {
+    guard type == .flagsChanged else {
       return
     }
 
-    guard event.keyCode == UInt16(kVK_RightOption) else {
+    guard keyCode == UInt16(kVK_RightOption) else {
       return
     }
 
-    let rightOptionPressed = (event.modifierFlags.rawValue & UInt(NX_DEVICERALTKEYMASK)) != 0
+    let rightOptionPressed = (flagsRawValue & UInt(NX_DEVICERALTKEYMASK)) != 0
 
     if rightOptionPressed, !isRightOptionDown {
       isRightOptionDown = true
-      rightOptionCallback?.onPress()
+      isRightOptionHoldActive = false
+
+      rightOptionHoldWorkItem?.cancel()
+      let workItem = DispatchWorkItem { [weak self] in
+        guard let self, self.isRightOptionDown else {
+          return
+        }
+
+        self.isRightOptionHoldActive = true
+        self.rightOptionCallback?.onHoldStart()
+      }
+      rightOptionHoldWorkItem = workItem
+      DispatchQueue.main.asyncAfter(deadline: .now() + rightOptionHoldThreshold, execute: workItem)
     } else if !rightOptionPressed, isRightOptionDown {
       isRightOptionDown = false
-      rightOptionCallback?.onRelease()
+      rightOptionHoldWorkItem?.cancel()
+      rightOptionHoldWorkItem = nil
+
+      if isRightOptionHoldActive {
+        isRightOptionHoldActive = false
+        rightOptionCallback?.onHoldStop()
+      } else {
+        rightOptionCallback?.onTap()
+      }
     }
   }
 
@@ -242,7 +291,10 @@ final class HotkeyManager {
     rightOptionGlobalMonitor = nil
     rightOptionLocalMonitor = nil
     rightOptionCallback = nil
+    rightOptionHoldWorkItem?.cancel()
+    rightOptionHoldWorkItem = nil
     isRightOptionDown = false
+    isRightOptionHoldActive = false
     callbacks.removeAll()
   }
 }
