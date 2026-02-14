@@ -1,8 +1,7 @@
-# OpenWispr
+# <img width="30" height="30" alt="image" src="https://github.com/user-attachments/assets/dec4aad1-b1d7-43a2-b8eb-6b7c12ea3d1a" /> OpenWispr
+
 
 A native macOS menu bar dictation app inspired by the Linux [`openwispr-gnome-extension`](https://github.com/tnfssc/openwispr-gnome-extension) flow.
-
-![OpenWispr](./openwispr.png)
 
 ![screenshot](https://github.com/user-attachments/assets/3290108e-621f-4c78-9ace-d1c385de779d)
 
