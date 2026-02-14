@@ -59,6 +59,12 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
             _('Verifies extension DBus, portal support, and companion engine availability.'),
             'openwispr doctor'
         );
+        this._addCommandRow(
+            companionGroup,
+            _('Copy Repair Command'),
+            _('Restarts portal/engine/hotkey services and reruns health checks.'),
+            'openwispr restart'
+        );
 
         const shortcutsGroup = new Adw.PreferencesGroup({ title: _('Shortcuts') });
         page.add(shortcutsGroup);

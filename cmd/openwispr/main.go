@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -31,11 +32,15 @@ const (
 	portalRequestInterface = "org.freedesktop.portal.Request"
 	portalSessionInterface = "org.freedesktop.portal.Session"
 	portalRegistryIface    = "org.freedesktop.host.portal.Registry"
+	extensionsBusName      = "org.gnome.Shell.Extensions"
+	extensionsPath         = dbus.ObjectPath("/org/gnome/Shell/Extensions")
+	extensionsInterface    = "org.gnome.Shell.Extensions"
 
 	defaultPortalTrigger = "Alt_R"
 	defaultEvdevDevice   = "/dev/input/by-path/platform-i8042-serio-0-event-kbd"
 	shortcutID           = "openwispr-hold"
 	portalAppID          = "io.github.tnfssc.openwispr"
+	extensionUUID        = "openwispr-gnome-extension@tnfssc.github.com"
 )
 
 type extensionClient struct {
@@ -103,6 +108,10 @@ func main() {
 		if err := runDoctor(conn, client); err != nil {
 			fatalf("doctor checks failed: %v", err)
 		}
+	case "restart":
+		if err := runRestart(os.Args[2:], conn, client); err != nil {
+			fatalf("restart failed: %v", err)
+		}
 	case "daemon":
 		if err := runDaemon(os.Args[2:], conn, client); err != nil {
 			fatalf("daemon failed: %v", err)
@@ -136,14 +145,37 @@ func runDaemon(args []string, conn *dbus.Conn, client *extensionClient) error {
 	case "evdev":
 		return runEvdevDaemon(ctx, client, *device, *key)
 	case "auto":
-		if err := runPortalDaemon(ctx, conn, client, *trigger); err == nil || ctx.Err() != nil {
-			return err
+		portalErr := runPortalDaemon(ctx, conn, client, *trigger)
+		if portalErr == nil || ctx.Err() != nil {
+			return portalErr
 		}
 
-		log.Printf("portal backend unavailable, falling back to evdev")
+		if isPortalStartupUnavailable(portalErr) {
+			return fmt.Errorf("portal backend unavailable, retrying on service restart: %w", portalErr)
+		}
+
+		log.Printf("portal backend failed (%v), falling back to evdev", portalErr)
 		return runEvdevDaemon(ctx, client, *device, *key)
 	default:
 		return fmt.Errorf("unsupported backend: %s", *backend)
+	}
+}
+
+func isPortalStartupUnavailable(err error) bool {
+	var dbusErr dbus.Error
+	if !errors.As(err, &dbusErr) {
+		return false
+	}
+
+	switch dbusErr.Name {
+	case "org.freedesktop.DBus.Error.ServiceUnknown",
+		"org.freedesktop.DBus.Error.NameHasNoOwner",
+		"org.freedesktop.DBus.Error.UnknownObject",
+		"org.freedesktop.DBus.Error.UnknownMethod",
+		"org.freedesktop.DBus.Error.UnknownInterface":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -302,6 +334,79 @@ func runDoctor(conn *dbus.Conn, client *extensionClient) error {
 		fmt.Printf("[ok] evdev device readable: %s\n", defaultEvdevDevice)
 	}
 
+	return nil
+}
+
+func runRestart(args []string, conn *dbus.Conn, client *extensionClient) error {
+	fs := flag.NewFlagSet("restart", flag.ExitOnError)
+	skipExtensionReload := fs.Bool("no-extension-reload", false, "do not disable/enable the GNOME extension")
+	_ = fs.Parse(args)
+
+	fmt.Println("[step] restarting portal services")
+	if err := runUserSystemctl("restart", "xdg-desktop-portal-gnome.service"); err != nil {
+		fmt.Printf("[warn] could not restart xdg-desktop-portal-gnome.service: %v\n", err)
+	}
+	if err := runUserSystemctl("restart", "xdg-desktop-portal.service"); err != nil {
+		fmt.Printf("[warn] could not restart xdg-desktop-portal.service: %v\n", err)
+	}
+
+	fmt.Println("[step] restarting openwispr services")
+	if err := runUserSystemctl("restart", "openwispr-engine.service"); err != nil {
+		return fmt.Errorf("restart openwispr-engine.service: %w", err)
+	}
+	if err := runUserSystemctl("restart", "openwispr-hotkeyd.service"); err != nil {
+		fmt.Printf("[warn] could not restart openwispr-hotkeyd.service: %v\n", err)
+	}
+
+	if !*skipExtensionReload {
+		fmt.Println("[step] reloading extension")
+		if err := reloadExtension(conn); err != nil {
+			fmt.Printf("[warn] could not reload extension over DBus: %v\n", err)
+		}
+	}
+
+	time.Sleep(400 * time.Millisecond)
+	fmt.Println("[step] running health checks")
+	if err := runDoctor(conn, client); err != nil {
+		return err
+	}
+
+	fmt.Println("[ok] openwispr restart completed")
+	return nil
+}
+
+func runUserSystemctl(args ...string) error {
+	cmd := exec.Command("systemctl", append([]string{"--user"}, args...)...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		trimmed := strings.TrimSpace(string(output))
+		if trimmed == "" {
+			return err
+		}
+		return fmt.Errorf("%w (%s)", err, trimmed)
+	}
+
+	return nil
+}
+
+func reloadExtension(conn *dbus.Conn) error {
+	obj := conn.Object(extensionsBusName, extensionsPath)
+
+	var disabled bool
+	if err := obj.Call(extensionsInterface+".DisableExtension", 0, extensionUUID).Store(&disabled); err != nil {
+		return err
+	}
+
+	var enabled bool
+	if err := obj.Call(extensionsInterface+".EnableExtension", 0, extensionUUID).Store(&enabled); err != nil {
+		return err
+	}
+
+	if !enabled {
+		return fmt.Errorf("extension %s did not report enabled", extensionUUID)
+	}
+
+	_ = disabled
 	return nil
 }
 
@@ -594,6 +699,7 @@ Usage:
   openwispr stop
   openwispr status
   openwispr doctor
+  openwispr restart [--no-extension-reload]
   openwispr daemon [--backend auto|portal|evdev] [--trigger Alt_R] [--device /dev/input/... ] [--evdev-key rightalt]
   openwispr engine
 `)

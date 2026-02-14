@@ -125,6 +125,7 @@ openwispr start
 openwispr stop
 openwispr status
 openwispr doctor
+openwispr restart
 openwispr engine
 ```
 
@@ -179,6 +180,20 @@ Portal-only test run:
 
 ```bash
 openwispr daemon --backend portal --trigger Alt_R
+```
+
+If `openwispr doctor` reports missing `org.freedesktop.portal.GlobalShortcuts`, start the GNOME portal backend and restart the daemon:
+
+```bash
+systemctl --user start xdg-desktop-portal-gnome.service
+systemctl --user restart xdg-desktop-portal.service
+systemctl --user restart openwispr-hotkeyd.service
+```
+
+Quick self-heal command (recommended):
+
+```bash
+openwispr restart
 ```
 
 If evdev fallback is needed, ensure input permissions (example for current user):
