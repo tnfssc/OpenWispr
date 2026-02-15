@@ -76,10 +76,7 @@ class OpenWisprController {
     enable() {
         this._settings = this.getSettings();
         this._migrateLegacyProviderNames();
-        this._recording = false;
-        this._processing = false;
-        this._recordingTrigger = null;
-        this._remoteHoldBinding = null;
+        this._resetState();
         this._holdKeyPressed = false;
         this._holdStartCooldownUntilUs = 0;
         this._holdToSpeakEnabled = this._settings.get_boolean('hold-to-speak-enabled');
@@ -728,10 +725,7 @@ export default class OpenWisprExtension extends Extension {
     }
 
     disable() {
-        if (!this._controller)
-            return;
-
-        this._controller.disable();
+        this._controller?.disable();
         this._controller = null;
     }
 }
