@@ -63,6 +63,10 @@ final class SettingsStore: ObservableObject {
     didSet { persist("autoPasteEnabled", autoPasteEnabled) }
   }
 
+  @Published var restoreClipboardEnabled: Bool {
+    didSet { persist("restoreClipboardEnabled", restoreClipboardEnabled) }
+  }
+
   @Published var notificationsEnabled: Bool {
     didSet { persist("notificationsEnabled", notificationsEnabled) }
   }
@@ -179,6 +183,7 @@ final class SettingsStore: ObservableObject {
     toggleShortcut = defaults.string(forKey: "toggleShortcut") ?? "<Control><Option>R"
 
     autoPasteEnabled = defaults.object(forKey: "autoPasteEnabled") as? Bool ?? true
+    restoreClipboardEnabled = defaults.object(forKey: "restoreClipboardEnabled") as? Bool ?? false
     notificationsEnabled = defaults.object(forKey: "notificationsEnabled") as? Bool ?? true
     startAtLoginEnabled = defaults.object(forKey: "startAtLoginEnabled") as? Bool ?? false
 
@@ -234,6 +239,7 @@ final class SettingsStore: ObservableObject {
       holdShortcut: holdShortcut,
       toggleShortcut: toggleShortcut,
       autoPasteEnabled: autoPasteEnabled,
+      restoreClipboardEnabled: restoreClipboardEnabled,
       notificationsEnabled: notificationsEnabled,
       silenceTrimEnabled: silenceTrimEnabled,
       silenceThreshold: silenceThreshold,

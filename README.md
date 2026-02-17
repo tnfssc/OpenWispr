@@ -13,6 +13,7 @@ A native macOS menu bar dictation app inspired by the Linux `openwispr-gnome-ext
 - Optional LLM transcript cleanup (OpenAI or Groq)
 - Optional FFmpeg silence trimming
 - Clipboard copy always + optional auto-paste (`Cmd+V` simulation)
+- Optional clipboard restore after auto-paste
 - Optional start-at-login toggle (when running as a bundled `.app`)
 
 ## Dependencies (Homebrew)

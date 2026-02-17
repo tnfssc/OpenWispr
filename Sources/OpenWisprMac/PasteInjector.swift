@@ -18,6 +18,56 @@ enum PasteInjectorError: LocalizedError {
 }
 
 enum PasteInjector {
+  struct ClipboardSnapshot {
+    struct Item {
+      struct Entry {
+        let type: NSPasteboard.PasteboardType
+        let data: Data
+      }
+
+      let entries: [Entry]
+    }
+
+    let items: [Item]
+  }
+
+  static func captureClipboard() -> ClipboardSnapshot {
+    let pasteboard = NSPasteboard.general
+    let items =
+      (pasteboard.pasteboardItems ?? []).map { item in
+        let entries: [ClipboardSnapshot.Item.Entry] =
+          item.types.compactMap { type in
+            guard let data = item.data(forType: type) else {
+              return nil
+            }
+            return ClipboardSnapshot.Item.Entry(type: type, data: data)
+          }
+        return ClipboardSnapshot.Item(entries: entries)
+      }
+
+    return ClipboardSnapshot(items: items)
+  }
+
+  static func restoreClipboard(_ snapshot: ClipboardSnapshot) {
+    let pasteboard = NSPasteboard.general
+    pasteboard.clearContents()
+
+    guard !snapshot.items.isEmpty else {
+      return
+    }
+
+    let restoredItems: [NSPasteboardItem] =
+      snapshot.items.map { snapshotItem in
+        let item = NSPasteboardItem()
+        snapshotItem.entries.forEach { entry in
+          item.setData(entry.data, forType: entry.type)
+        }
+        return item
+      }
+
+    pasteboard.writeObjects(restoredItems)
+  }
+
   static func copyToClipboard(_ text: String) {
     let pasteboard = NSPasteboard.general
     pasteboard.clearContents()

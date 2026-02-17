@@ -31,7 +31,15 @@ struct SettingsView: View {
 
       Section("Output") {
         Toggle("Auto Paste", isOn: $settings.autoPasteEnabled)
+        Toggle("Restore Clipboard", isOn: $settings.restoreClipboardEnabled)
+          .disabled(!settings.autoPasteEnabled)
         Toggle("Notifications", isOn: $settings.notificationsEnabled)
+
+        if settings.autoPasteEnabled && settings.restoreClipboardEnabled {
+          Text("After auto-paste, restore previous clipboard contents.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
 
         Toggle("Start At Login", isOn: $settings.startAtLoginEnabled)
           .disabled(!appState.startAtLoginSupported)

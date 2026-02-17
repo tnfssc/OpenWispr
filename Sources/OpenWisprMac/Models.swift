@@ -53,6 +53,7 @@ struct SettingsSnapshot {
   let holdShortcut: String
   let toggleShortcut: String
   let autoPasteEnabled: Bool
+  let restoreClipboardEnabled: Bool
   let notificationsEnabled: Bool
   let silenceTrimEnabled: Bool
   let silenceThreshold: String

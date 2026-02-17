@@ -208,6 +208,9 @@ final class AppState: ObservableObject {
     }
 
     lastTranscript = cleaned
+    let clipboardSnapshot =
+      settings.autoPasteEnabled && settings.restoreClipboardEnabled
+      ? PasteInjector.captureClipboard() : nil
     PasteInjector.copyToClipboard(cleaned)
 
     if settings.autoPasteEnabled {
@@ -217,6 +220,11 @@ final class AppState: ObservableObject {
 
       do {
         try PasteInjector.pasteClipboard(preferredTargetPID: pendingPasteTargetPID)
+
+        if let clipboardSnapshot {
+          try? await Task.sleep(nanoseconds: 120_000_000)
+          PasteInjector.restoreClipboard(clipboardSnapshot)
+        }
       } catch {
         let message = "Copied to clipboard. Auto-paste failed: \(error.localizedDescription)"
         lastError = message
