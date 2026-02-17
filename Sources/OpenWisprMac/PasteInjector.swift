@@ -59,7 +59,7 @@ enum PasteInjector {
     let restoredItems: [NSPasteboardItem] =
       snapshot.items.map { snapshotItem in
         let item = NSPasteboardItem()
-        snapshotItem.entries.forEach { entry in
+        for entry in snapshotItem.entries {
           item.setData(entry.data, forType: entry.type)
         }
         return item
