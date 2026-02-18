@@ -17,6 +17,10 @@
       <default>true</default>
       <summary>Automatically paste transcribed text into active app</summary>
     </key>
+    <key name="restore-clipboard-enabled" type="b">
+      <default>true</default>
+      <summary>Restore original clipboard content after paste</summary>
+    </key>
     <key name="notifications-enabled" type="b">
       <default>true</default>
       <summary>Show extension notifications</summary>

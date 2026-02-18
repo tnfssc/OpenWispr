@@ -97,6 +97,14 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         autoPasteRow.connect('notify::active', () => settings.set_boolean('auto-paste-enabled', autoPasteRow.active));
         shortcutsGroup.add(autoPasteRow);
 
+        const restoreClipboardRow = new Adw.SwitchRow({
+            title: _('Restore Clipboard'),
+            subtitle: _('Restore original clipboard content after pasting transcription.'),
+            active: settings.get_boolean('restore-clipboard-enabled'),
+        });
+        restoreClipboardRow.connect('notify::active', () => settings.set_boolean('restore-clipboard-enabled', restoreClipboardRow.active));
+        shortcutsGroup.add(restoreClipboardRow);
+
         const notificationsRow = new Adw.SwitchRow({
             title: _('Enable Notifications'),
             subtitle: _('Show status and transcription notifications.'),
