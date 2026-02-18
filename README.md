@@ -19,6 +19,7 @@ Also checkout [OpenWispr for macOS](https://github.com/tnfssc/OpenWispr)
 - **Companion Engine + Daemon**: Uses `openwispr` user services over D-Bus for recording/transcription and optional hold daemon shortcuts.
 - **System Integration**: Seamless integration with the GNOME top bar.
 - **Clipboard Injection**: Automatically pastes transcribed text into the active text field.
+- **Clipboard Restore**: Optionally restore original clipboard content after auto-paste (enabled by default).
 - **Clipboard-Only Mode**: Optionally copy transcription without auto-paste for apps where paste is unsafe.
 - **Configurable Notifications**: Optionally enable or disable extension notifications.
 
@@ -239,6 +240,10 @@ For start/stop split bindings (optional):
 Auto-paste behavior can be toggled in extension preferences or via:
 *   **Schema**: `org.gnome.shell.extensions.openwispr`
 *   **Key**: `auto-paste-enabled`
+
+Clipboard restore behavior can be toggled in extension preferences or via:
+*   **Schema**: `org.gnome.shell.extensions.openwispr`
+*   **Key**: `restore-clipboard-enabled`
 
 Notification behavior can be toggled in extension preferences or via:
 *   **Schema**: `org.gnome.shell.extensions.openwispr`

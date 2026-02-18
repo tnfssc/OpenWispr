@@ -84,6 +84,7 @@ class OpenWisprController {
             this._settings.get_strv('hold-to-speak-keybinding')[0] || '<Control><Alt>t'
         );
         this._autoPasteEnabled = this._settings.get_boolean('auto-paste-enabled');
+        this._restoreClipboardEnabled = this._settings.get_boolean('restore-clipboard-enabled');
         this._notificationsEnabled = this._settings.get_boolean('notifications-enabled');
         this._companionProxy = null;
 
@@ -170,6 +171,10 @@ class OpenWisprController {
             this._autoPasteEnabled = this._settings.get_boolean('auto-paste-enabled');
         });
 
+        this._restoreClipboardChangedId = this._settings.connect('changed::restore-clipboard-enabled', () => {
+            this._restoreClipboardEnabled = this._settings.get_boolean('restore-clipboard-enabled');
+        });
+
         this._holdToSpeakBindingChangedId = this._settings.connect('changed::hold-to-speak-keybinding', () => {
             this._holdToSpeakBinding = this._parseAccelerator(
                 this._settings.get_strv('hold-to-speak-keybinding')[0] || '<Control><Alt>t'
@@ -199,6 +204,11 @@ class OpenWisprController {
         if (this._settings && this._autoPasteChangedId) {
             this._settings.disconnect(this._autoPasteChangedId);
             this._autoPasteChangedId = null;
+        }
+
+        if (this._settings && this._restoreClipboardChangedId) {
+            this._settings.disconnect(this._restoreClipboardChangedId);
+            this._restoreClipboardChangedId = null;
         }
 
         if (this._settings && this._holdToSpeakBindingChangedId) {
@@ -654,6 +664,20 @@ class OpenWisprController {
         // Clutter Virtual Input
         try {
             const clipboard = St.Clipboard.get_default();
+            
+            // Capture original clipboard content if restore feature is enabled
+            let originalClipboard = null;
+            if (this._restoreClipboardEnabled) {
+                try {
+                    clipboard.get_text(St.ClipboardType.CLIPBOARD, (clipboard, clipboardText) => {
+                        originalClipboard = clipboardText;
+                        this._debug(`Captured original clipboard (${originalClipboard ? originalClipboard.length : 0} chars)`);
+                    });
+                } catch (e) {
+                    console.error(`[openwispr-gnome-extension] Failed to capture clipboard: ${e}`);
+                }
+            }
+
             clipboard.set_text(St.ClipboardType.CLIPBOARD, text);
 
             if (!this._autoPasteEnabled) {
@@ -678,6 +702,28 @@ class OpenWisprController {
             virtualDevice.notify_keyval(time++, Clutter.KEY_Control_L, Clutter.KeyState.RELEASED);
             
             this._debug('Text injected via clipboard paste');
+            
+            // Restore original clipboard after a short delay to ensure paste completes
+            if (this._restoreClipboardEnabled && originalClipboard !== null) {
+                GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+                    try {
+                        // Check if clipboard still contains our transcription text (guardrail)
+                        clipboard.get_text(St.ClipboardType.CLIPBOARD, (clipboard, currentClipboard) => {
+                            if (currentClipboard === text) {
+                                // Safe to restore
+                                clipboard.set_text(St.ClipboardType.CLIPBOARD, originalClipboard);
+                                this._debug('Restored original clipboard content');
+                            } else {
+                                // User copied something else in the meantime, don't overwrite
+                                this._debug('Clipboard changed during operation, skipping restore');
+                            }
+                        });
+                    } catch (e) {
+                        console.error(`[openwispr-gnome-extension] Failed to restore clipboard: ${e}`);
+                    }
+                    return GLib.SOURCE_REMOVE;
+                });
+            }
             
         } catch (e) {
             console.error(`[openwispr-gnome-extension] Injection failed: ${e}`);
