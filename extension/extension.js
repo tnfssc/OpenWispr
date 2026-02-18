@@ -666,18 +666,23 @@ class OpenWisprController {
             const clipboard = St.Clipboard.get_default();
             
             // Capture original clipboard content if restore feature is enabled
-            let originalClipboard = null;
             if (this._restoreClipboardEnabled) {
-                try {
-                    clipboard.get_text(St.ClipboardType.CLIPBOARD, (clipboard, clipboardText) => {
-                        originalClipboard = clipboardText;
-                        this._debug(`Captured original clipboard (${originalClipboard ? originalClipboard.length : 0} chars)`);
-                    });
-                } catch (e) {
-                    console.error(`[openwispr-gnome-extension] Failed to capture clipboard: ${e}`);
-                }
+                clipboard.get_text(St.ClipboardType.CLIPBOARD, (clipboard, originalClipboard) => {
+                    this._debug(`Captured original clipboard (${originalClipboard ? originalClipboard.length : 0} chars)`);
+                    this._injectTextWithClipboard(text, originalClipboard);
+                });
+            } else {
+                this._injectTextWithClipboard(text, null);
             }
+        } catch (e) {
+            console.error(`[openwispr-gnome-extension] Injection failed: ${e}`);
+            this._notify(`Copied to clipboard: ${text}`);
+        }
+    }
 
+    _injectTextWithClipboard(text, originalClipboard) {
+        try {
+            const clipboard = St.Clipboard.get_default();
             clipboard.set_text(St.ClipboardType.CLIPBOARD, text);
 
             if (!this._autoPasteEnabled) {
