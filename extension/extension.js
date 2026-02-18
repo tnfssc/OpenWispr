@@ -11,6 +11,7 @@ import { Extension, gettext as _ } from 'resource:///org/gnome/shell/extensions/
 
 // Constants
 const DEBUG_LOGS = false;
+const CLIPBOARD_RESTORE_DELAY_MS = 100;
 const DBUS_CONTROL_BUS_NAME = 'org.gnome.Shell.Extensions.OpenWispr';
 const DBUS_CONTROL_PATH = '/org/gnome/Shell/Extensions/OpenWispr';
 const COMPANION_BUS_NAME = 'io.github.tnfssc.OpenWispr.Recorder';
@@ -667,7 +668,7 @@ class OpenWisprController {
             
             // Capture original clipboard content if restore feature is enabled
             if (this._restoreClipboardEnabled) {
-                clipboard.get_text(St.ClipboardType.CLIPBOARD, (clipboard, originalClipboard) => {
+                clipboard.get_text(St.ClipboardType.CLIPBOARD, (_cb, originalClipboard) => {
                     this._debug(`Captured original clipboard (${originalClipboard ? originalClipboard.length : 0} chars)`);
                     this._injectTextWithClipboard(text, originalClipboard);
                 });
@@ -710,10 +711,10 @@ class OpenWisprController {
             
             // Restore original clipboard after a short delay to ensure paste completes
             if (this._restoreClipboardEnabled && originalClipboard !== null) {
-                GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+                GLib.timeout_add(GLib.PRIORITY_DEFAULT, CLIPBOARD_RESTORE_DELAY_MS, () => {
                     try {
                         // Check if clipboard still contains our transcription text (guardrail)
-                        clipboard.get_text(St.ClipboardType.CLIPBOARD, (clipboard, currentClipboard) => {
+                        clipboard.get_text(St.ClipboardType.CLIPBOARD, (_cb, currentClipboard) => {
                             if (currentClipboard === text) {
                                 // Safe to restore
                                 clipboard.set_text(St.ClipboardType.CLIPBOARD, originalClipboard);
