@@ -79,6 +79,7 @@ try {
     assertEqual(defaultValue(schema, 'hold-to-speak-keybinding')[0], '<Control><Alt>t', "'hold-to-speak-keybinding' default");
 
     assertEqual(defaultValue(schema, 'auto-paste-enabled'), true, "'auto-paste-enabled' default");
+    assertEqual(defaultValue(schema, 'restore-clipboard-enabled'), true, "'restore-clipboard-enabled' default");
     assertEqual(defaultValue(schema, 'notifications-enabled'), true, "'notifications-enabled' default");
 
     assertEqual(defaultValue(schema, 'silence-trim-enabled'), true, "'silence-trim-enabled' default");
