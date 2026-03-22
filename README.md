@@ -4,7 +4,7 @@
 
 Also checkout [OpenWispr for macOS](https://github.com/tnfssc/OpenWispr)
 
-**openwispr-gnome-extension** is an AI-powered voice-to-text dictation extension for GNOME Shell. It leverages local AI models (via `whisper-cli`) to provide private, fast, and accurate speech recognition directly into any application.
+**openwispr-gnome-extension** is an AI-powered voice-to-text dictation extension for GNOME Shell. It supports local AI models via `whisper-cli` or remote STT endpoints to provide private, fast, and accurate speech recognition directly into any application.
 
 <img width="429" height="255" alt="screenshot" src="https://github.com/user-attachments/assets/6a1856a2-228f-434a-8319-5386ec1b4cf0" />
 
@@ -28,15 +28,14 @@ Also checkout [OpenWispr for macOS](https://github.com/tnfssc/OpenWispr)
 Before installing, ensure you have the following dependencies:
 
 1.  **GNOME Shell**: Supported versions 45 - 49.
-2.  **whisper-cli**: The command-line interface for the Whisper model.
-    *   Ensure `whisper-cli` is installed and available in your system `PATH`.
-    *   *Note: This extension expects the `whisper-cli` binary specifically.*
-3.  **ffmpeg**: Required for silence trimming.
-4.  **go** (optional): Needed only to build the companion `openwispr` binary from source.
+2.  **ffmpeg**: Required for silence trimming.
+3.  **go** (optional): Needed only to build the companion `openwispr` binary from source.
 
-### Install `whisper-cli` Locally
+## Choose Your STT Setup
 
-If `whisper-cli` is missing, local transcription will not work.
+### Local STT (`whisper-cli`)
+
+Use this path if you want on-device transcription.
 
 1.  **Build `whisper-cli` from source (recommended, works on most Linux distros)**
     ```bash
@@ -54,19 +53,51 @@ If `whisper-cli` is missing, local transcription will not work.
     which whisper-cli
     ```
 
-3.  **If command is not found, add `~/.local/bin` to PATH**
+3.  **Add `~/.local/bin` to your shell PATH if needed**
     ```bash
     echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
     # or ~/.zshrc if you use zsh
-    ```
-
-4.  **Reload your shell**
-    ```bash
     source ~/.bashrc
     # or source ~/.zshrc
     ```
 
-If you do not want local `whisper-cli`, set STT provider to OpenAI or Groq in extension preferences.
+4.  **Make `whisper-cli` visible to the GNOME user session**
+    Use one of these options after updating your shell PATH:
+
+    ```bash
+    systemctl --user import-environment PATH
+    systemctl --user restart openwispr-engine.service
+    ```
+
+    Or add an explicit PATH to the user service unit:
+
+    ```ini
+    Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
+    ```
+
+    Then reload and restart the service:
+
+    ```bash
+    systemctl --user daemon-reload
+    systemctl --user restart openwispr-engine.service
+    ```
+
+5.  **Download a GGML-compatible model**
+    Local transcription requires a Whisper model file. Download one and place it in `extension/models/`.
+
+    ```bash
+    mkdir -p extension/models
+    # Example: Download base.en model (adjust URL as needed for your preferred model source)
+    wget https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin -O extension/models/ggml-base.en.bin
+    ```
+
+### Remote STT (OpenAI or Groq)
+
+Use this path if you want to skip local Whisper binaries and models.
+
+1.  Set the STT provider to OpenAI or Groq in extension preferences.
+2.  Configure the relevant API key and endpoint settings.
+3.  Skip the local `whisper-cli` and model download steps above.
 
 ## Installation
 
@@ -76,26 +107,17 @@ If you do not want local `whisper-cli`, set STT provider to OpenAI or Groq in ex
     cd openwispr-gnome-extension
     ```
 
-2.  **Download the Model**
-    Since AI models are large, they are not included in the git repository. You need to download a GGML compatible model (e.g., `ggml-base.en.bin`) and place it in the `extension/models/` directory.
-
-    ```bash
-    mkdir -p extension/models
-    # Example: Download base.en model (adjust URL as needed for your preferred model source)
-    wget https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin -O extension/models/ggml-base.en.bin
-    ```
-
-3.  **Install the Extension**
+2.  **Install the Extension**
     Run the included installation script to symlink the extension to your GNOME extensions directory.
     ```bash
     ./install.sh
     ```
 
-4.  **Restart GNOME Shell**
+3.  **Restart GNOME Shell**
     *   **Wayland**: Log out and log back in.
     *   **X11**: Press `Alt+F2`, type `r`, and press Enter.
 
-5.  **Enable the Extension**
+4.  **Enable the Extension**
     ```bash
     gnome-extensions enable openwispr-gnome-extension@tnfssc.github.com
     ```

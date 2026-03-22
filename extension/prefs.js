@@ -406,6 +406,15 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
             setButton.set_label(this._formatShortcutLabel(defaultAccelerator));
         });
 
+        const clearButton = new Gtk.Button({
+            label: _('Clear'),
+            valign: Gtk.Align.CENTER,
+        });
+        clearButton.connect('clicked', () => {
+            settings.set_strv(key, []);
+            setButton.set_label(this._formatShortcutLabel(''));
+        });
+
         settings.connect(`changed::${key}`, () => {
             const current = settings.get_strv(key)[0] || '';
             setButton.set_label(this._formatShortcutLabel(current));
@@ -413,6 +422,7 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
 
         buttonBox.append(setButton);
         buttonBox.append(resetButton);
+        buttonBox.append(clearButton);
         row.add_suffix(buttonBox);
         row.activatable_widget = setButton;
         group.add(row);
