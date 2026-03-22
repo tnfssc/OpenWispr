@@ -78,16 +78,14 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         holdToSpeakRow.connect('notify::active', () => settings.set_boolean('hold-to-speak-enabled', holdToSpeakRow.active));
         shortcutsGroup.add(holdToSpeakRow);
 
-        const currentHoldShortcut = settings.get_strv('hold-to-speak-keybinding')[0] || '';
-        const holdShortcutRow = new Adw.EntryRow({
-            title: _('Hold To Speak Shortcut'),
-            text: currentHoldShortcut,
-        });
-        holdShortcutRow.connect('apply', () => {
-            if (holdShortcutRow.text)
-                settings.set_strv('hold-to-speak-keybinding', [holdShortcutRow.text]);
-        });
-        shortcutsGroup.add(holdShortcutRow);
+        this._addShortcutCaptureRow(
+            window,
+            shortcutsGroup,
+            settings,
+            'hold-to-speak-keybinding',
+            _('Hold To Speak Shortcut'),
+            _('Click Set, then press the key combination.')
+        );
 
         const autoPasteRow = new Adw.SwitchRow({
             title: _('Auto Paste Transcription'),
@@ -113,16 +111,14 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         notificationsRow.connect('notify::active', () => settings.set_boolean('notifications-enabled', notificationsRow.active));
         shortcutsGroup.add(notificationsRow);
 
-        const currentShortcut = settings.get_strv('toggle-recording')[0] || '';
-        const shortcutRow = new Adw.EntryRow({
-            title: _('Toggle Recording'),
-            text: currentShortcut,
-        });
-        shortcutRow.connect('apply', () => {
-            if (shortcutRow.text)
-                settings.set_strv('toggle-recording', [shortcutRow.text]);
-        });
-        shortcutsGroup.add(shortcutRow);
+        this._addShortcutCaptureRow(
+            window,
+            shortcutsGroup,
+            settings,
+            'toggle-recording',
+            _('Toggle Recording'),
+            _('Click Set, then press the key combination.')
+        );
 
         const audioGroup = new Adw.PreferencesGroup({ title: _('Audio Pipeline') });
         page.add(audioGroup);
@@ -241,6 +237,172 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         });
         row.connect('notify::text', () => settings.set_string(key, row.text));
         group.add(row);
+    }
+
+    _addShortcutCaptureRow(window, group, settings, key, title, subtitle) {
+        const defaultAccelerator = this._getDefaultShortcut(settings, key);
+
+        const row = new Adw.ActionRow({
+            title,
+            subtitle,
+        });
+
+        const buttonBox = new Gtk.Box({
+            orientation: Gtk.Orientation.HORIZONTAL,
+            spacing: 6,
+            valign: Gtk.Align.CENTER,
+        });
+
+        const setButton = new Gtk.Button({
+            label: this._formatShortcutLabel(settings.get_strv(key)[0] || ''),
+            valign: Gtk.Align.CENTER,
+        });
+        setButton.connect('clicked', () => {
+            this._showShortcutCaptureDialog(window, accelerator => {
+                settings.set_strv(key, accelerator ? [accelerator] : []);
+                setButton.set_label(this._formatShortcutLabel(accelerator));
+            });
+        });
+
+        const resetButton = new Gtk.Button({
+            label: _('Reset'),
+            valign: Gtk.Align.CENTER,
+        });
+        resetButton.connect('clicked', () => {
+            settings.set_strv(key, defaultAccelerator ? [defaultAccelerator] : []);
+            setButton.set_label(this._formatShortcutLabel(defaultAccelerator));
+        });
+
+        settings.connect(`changed::${key}`, () => {
+            const current = settings.get_strv(key)[0] || '';
+            setButton.set_label(this._formatShortcutLabel(current));
+        });
+
+        buttonBox.append(setButton);
+        buttonBox.append(resetButton);
+        row.add_suffix(buttonBox);
+        row.activatable_widget = setButton;
+        group.add(row);
+    }
+
+    _showShortcutCaptureDialog(window, onCaptured) {
+        const dialog = new Gtk.Window({
+            title: _('Set Shortcut'),
+            transient_for: window,
+            modal: true,
+            resizable: false,
+            default_width: 360,
+            default_height: 90,
+        });
+
+        const content = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            spacing: 8,
+            margin_top: 16,
+            margin_bottom: 16,
+            margin_start: 16,
+            margin_end: 16,
+        });
+
+        const instructionLabel = new Gtk.Label({
+            label: _('Press a key combination now. Press Esc to cancel.'),
+            wrap: true,
+            xalign: 0,
+        });
+        content.append(instructionLabel);
+
+        const cancelButton = new Gtk.Button({
+            label: _('Cancel'),
+            halign: Gtk.Align.END,
+        });
+        cancelButton.connect('clicked', () => dialog.close());
+        content.append(cancelButton);
+
+        dialog.set_child(content);
+
+        const keyController = new Gtk.EventControllerKey();
+        keyController.connect('key-pressed', (_controller, keyval, _keycode, state) => {
+            if (keyval === Gdk.KEY_Escape) {
+                dialog.close();
+                return Gdk.EVENT_STOP;
+            }
+
+            if (this._isModifierKey(keyval))
+                return Gdk.EVENT_STOP;
+
+            const modifierMask = state & Gtk.accelerator_get_default_mod_mask();
+            if (!Gtk.accelerator_valid(keyval, modifierMask)) {
+                instructionLabel.set_label(_('Invalid shortcut. Use one key plus optional modifiers.'));
+                return Gdk.EVENT_STOP;
+            }
+
+            const accelerator = Gtk.accelerator_name(keyval, modifierMask);
+
+            if (!accelerator)
+                return Gdk.EVENT_STOP;
+
+            onCaptured(accelerator);
+            dialog.close();
+            return Gdk.EVENT_STOP;
+        });
+
+        dialog.add_controller(keyController);
+        dialog.present();
+    }
+
+    _isModifierKey(keyval) {
+        return [
+            Gdk.KEY_Shift_L,
+            Gdk.KEY_Shift_R,
+            Gdk.KEY_Control_L,
+            Gdk.KEY_Control_R,
+            Gdk.KEY_Alt_L,
+            Gdk.KEY_Alt_R,
+            Gdk.KEY_Meta_L,
+            Gdk.KEY_Meta_R,
+            Gdk.KEY_Super_L,
+            Gdk.KEY_Super_R,
+            Gdk.KEY_Hyper_L,
+            Gdk.KEY_Hyper_R,
+        ].includes(keyval);
+    }
+
+    _formatShortcutLabel(accelerator) {
+        if (!accelerator)
+            return _('Not set');
+
+        const modifierTokens = [...accelerator.matchAll(/<([^>]+)>/g)]
+            .map(match => match[1].trim().toLowerCase());
+        const keyToken = accelerator.replace(/<[^>]+>/g, '').trim();
+
+        const modifiers = modifierTokens
+            .map(token => {
+                if (token === 'control' || token === 'ctrl' || token === 'primary')
+                    return 'Ctrl';
+                if (token === 'shift')
+                    return 'Shift';
+                if (token === 'alt' || token === 'mod1')
+                    return 'Alt';
+                if (token === 'super' || token === 'meta' || token === 'mod4')
+                    return 'Super';
+                return token;
+            })
+            .filter(Boolean);
+
+        if (keyToken)
+            modifiers.push(keyToken.length === 1 ? keyToken.toUpperCase() : keyToken);
+
+        return modifiers.length > 0 ? modifiers.join(' + ') : accelerator;
+    }
+
+    _getDefaultShortcut(settings, key) {
+        const defaultVariant = settings.get_default_value(key);
+        const defaultValue = defaultVariant?.deep_unpack?.() || [];
+
+        if (!Array.isArray(defaultValue) || defaultValue.length === 0)
+            return '';
+
+        return defaultValue[0] || '';
     }
 
     _addLinkRow(group, title, subtitle, url) {
