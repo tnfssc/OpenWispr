@@ -34,6 +34,40 @@ Before installing, ensure you have the following dependencies:
 3.  **ffmpeg**: Required for silence trimming.
 4.  **go** (optional): Needed only to build the companion `openwispr` binary from source.
 
+### Install `whisper-cli` Locally
+
+If `whisper-cli` is missing, local transcription will not work.
+
+1.  **Build `whisper-cli` from source (recommended, works on most Linux distros)**
+    ```bash
+    git clone https://github.com/ggerganov/whisper.cpp.git
+    cd whisper.cpp
+    cmake -B build -DWHISPER_BUILD_EXAMPLES=ON
+    cmake --build build -j
+    mkdir -p ~/.local/bin
+    install -Dm755 build/bin/whisper-cli ~/.local/bin/whisper-cli
+    ```
+
+2.  **Verify install**
+    ```bash
+    whisper-cli --help
+    which whisper-cli
+    ```
+
+3.  **If command is not found, add `~/.local/bin` to PATH**
+    ```bash
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+    # or ~/.zshrc if you use zsh
+    ```
+
+4.  **Reload your shell**
+    ```bash
+    source ~/.bashrc
+    # or source ~/.zshrc
+    ```
+
+If you do not want local `whisper-cli`, set STT provider to OpenAI or Groq in extension preferences.
+
 ## Installation
 
 1.  **Clone the Repository**

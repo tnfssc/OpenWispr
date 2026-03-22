@@ -66,7 +66,6 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
             _('Restarts portal/engine/hotkey services and reruns health checks.'),
             'openwispr restart'
         );
-
         const shortcutsGroup = new Adw.PreferencesGroup({ title: _('Shortcuts') });
         page.add(shortcutsGroup);
 
@@ -170,19 +169,33 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         const currentSttProvider = this._normalizeProvider(settings.get_string('stt-provider'));
         const sttIndex = sttProviderOptions.findIndex(option => option.id === currentSttProvider);
         sttProviderRow.selected = sttIndex >= 0 ? sttIndex : 0;
+
+        const sttOpenAiEndpointRow = this._addEntryRow(sttGroup, settings, 'stt-openai-endpoint', _('OpenAI STT Endpoint'));
+        const sttOpenAiModelRow = this._addEntryRow(sttGroup, settings, 'stt-openai-model', _('OpenAI STT Model'));
+        const sttOpenAiApiKeyRow = this._addSecretRow(sttGroup, settings, 'stt-openai-api-key', _('OpenAI STT API Key'));
+        const sttGroqEndpointRow = this._addEntryRow(sttGroup, settings, 'stt-groq-endpoint', _('Groq STT Endpoint'));
+        const sttGroqModelRow = this._addEntryRow(sttGroup, settings, 'stt-groq-model', _('Groq STT Model'));
+        const sttGroqApiKeyRow = this._addSecretRow(sttGroup, settings, 'stt-groq-api-key', _('Groq STT API Key'));
+
+        const updateSttProviderVisibility = providerId => {
+            const showOpenAi = providerId === 'openai';
+            const showGroq = providerId === 'groq';
+
+            sttOpenAiEndpointRow.set_visible(showOpenAi);
+            sttOpenAiModelRow.set_visible(showOpenAi);
+            sttOpenAiApiKeyRow.set_visible(showOpenAi);
+            sttGroqEndpointRow.set_visible(showGroq);
+            sttGroqModelRow.set_visible(showGroq);
+            sttGroqApiKeyRow.set_visible(showGroq);
+        };
+
+        updateSttProviderVisibility(sttProviderOptions[sttProviderRow.selected]?.id || sttProviderOptions[0].id);
         sttProviderRow.connect('notify::selected', () => {
             const selected = sttProviderOptions[sttProviderRow.selected] || sttProviderOptions[0];
             settings.set_string('stt-provider', selected.id);
+            updateSttProviderVisibility(selected.id);
         });
         sttGroup.add(sttProviderRow);
-
-        this._addEntryRow(sttGroup, settings, 'stt-openai-endpoint', _('OpenAI STT Endpoint'));
-        this._addEntryRow(sttGroup, settings, 'stt-openai-model', _('OpenAI STT Model'));
-        this._addEntryRow(sttGroup, settings, 'stt-openai-api-key', _('OpenAI STT API Key'));
-
-        this._addEntryRow(sttGroup, settings, 'stt-groq-endpoint', _('Groq STT Endpoint'));
-        this._addEntryRow(sttGroup, settings, 'stt-groq-model', _('Groq STT Model'));
-        this._addEntryRow(sttGroup, settings, 'stt-groq-api-key', _('Groq STT API Key'));
 
         const llmGroup = new Adw.PreferencesGroup({ title: _('LLM Cleanup') });
         page.add(llmGroup);
@@ -208,26 +221,42 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         const currentLlmProvider = this._normalizeProvider(settings.get_string('llm-provider'));
         const llmIndex = llmProviderOptions.findIndex(option => option.id === currentLlmProvider);
         llmProviderRow.selected = llmIndex >= 0 ? llmIndex : 0;
+
+        const llmOpenAiEndpointRow = this._addEntryRow(llmGroup, settings, 'llm-openai-endpoint', _('OpenAI LLM Endpoint'));
+        const llmOpenAiModelRow = this._addEntryRow(llmGroup, settings, 'llm-openai-model', _('OpenAI LLM Model'));
+        const llmOpenAiApiKeyRow = this._addSecretRow(llmGroup, settings, 'llm-openai-api-key', _('OpenAI LLM API Key'));
+        const llmGroqEndpointRow = this._addEntryRow(llmGroup, settings, 'llm-groq-endpoint', _('Groq LLM Endpoint'));
+        const llmGroqModelRow = this._addEntryRow(llmGroup, settings, 'llm-groq-model', _('Groq LLM Model'));
+        const llmGroqApiKeyRow = this._addSecretRow(llmGroup, settings, 'llm-groq-api-key', _('Groq LLM API Key'));
+
+        const updateLlmProviderVisibility = providerId => {
+            const showOpenAi = providerId === 'openai';
+            const showGroq = providerId === 'groq';
+
+            llmOpenAiEndpointRow.set_visible(showOpenAi);
+            llmOpenAiModelRow.set_visible(showOpenAi);
+            llmOpenAiApiKeyRow.set_visible(showOpenAi);
+            llmGroqEndpointRow.set_visible(showGroq);
+            llmGroqModelRow.set_visible(showGroq);
+            llmGroqApiKeyRow.set_visible(showGroq);
+        };
+
+        updateLlmProviderVisibility(llmProviderOptions[llmProviderRow.selected]?.id || llmProviderOptions[0].id);
         llmProviderRow.connect('notify::selected', () => {
             const selected = llmProviderOptions[llmProviderRow.selected] || llmProviderOptions[0];
             settings.set_string('llm-provider', selected.id);
+            updateLlmProviderVisibility(selected.id);
         });
         llmGroup.add(llmProviderRow);
 
-        this._addEntryRow(llmGroup, settings, 'llm-openai-endpoint', _('OpenAI LLM Endpoint'));
-        this._addEntryRow(llmGroup, settings, 'llm-openai-model', _('OpenAI LLM Model'));
-        this._addEntryRow(llmGroup, settings, 'llm-openai-api-key', _('OpenAI LLM API Key'));
-
-        this._addEntryRow(llmGroup, settings, 'llm-groq-endpoint', _('Groq LLM Endpoint'));
-        this._addEntryRow(llmGroup, settings, 'llm-groq-model', _('Groq LLM Model'));
-        this._addEntryRow(llmGroup, settings, 'llm-groq-api-key', _('Groq LLM API Key'));
-
-        const llmPromptRow = new Adw.EntryRow({
-            title: _('LLM Cleanup Prompt'),
-            text: settings.get_string('llm-cleanup-prompt'),
-        });
-        llmPromptRow.connect('notify::text', () => settings.set_string('llm-cleanup-prompt', llmPromptRow.text));
-        llmGroup.add(llmPromptRow);
+        this._addMultilineEditorRow(
+            window,
+            llmGroup,
+            settings,
+            'llm-cleanup-prompt',
+            _('LLM Cleanup Prompt'),
+            _('Edit multiline cleanup instructions.')
+        );
     }
 
     _addEntryRow(group, settings, key, title) {
@@ -237,6 +266,110 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         });
         row.connect('notify::text', () => settings.set_string(key, row.text));
         group.add(row);
+        return row;
+    }
+
+    _addSecretRow(group, settings, key, title) {
+        const row = new Adw.ActionRow({ title });
+
+        const entry = new Gtk.PasswordEntry({
+            text: settings.get_string(key),
+            show_peek_icon: true,
+            valign: Gtk.Align.CENTER,
+            width_chars: 24,
+        });
+        entry.connect('notify::text', () => settings.set_string(key, entry.text));
+
+        row.add_suffix(entry);
+        row.activatable_widget = entry;
+        group.add(row);
+        return row;
+    }
+
+    _addMultilineEditorRow(window, group, settings, key, title, subtitle) {
+        const row = new Adw.ActionRow({
+            title,
+            subtitle,
+        });
+
+        const editButton = new Gtk.Button({
+            label: _('Edit'),
+            valign: Gtk.Align.CENTER,
+        });
+        editButton.connect('clicked', () => {
+            this._showMultilineEditDialog(window, title, settings.get_string(key), text => {
+                settings.set_string(key, text);
+            });
+        });
+
+        row.add_suffix(editButton);
+        row.activatable_widget = editButton;
+        group.add(row);
+    }
+
+    _showMultilineEditDialog(window, title, initialText, onSave) {
+        const dialog = new Gtk.Window({
+            title,
+            transient_for: window,
+            modal: true,
+            resizable: true,
+            default_width: 780,
+            default_height: 480,
+        });
+
+        const content = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            spacing: 10,
+            margin_top: 12,
+            margin_bottom: 12,
+            margin_start: 12,
+            margin_end: 12,
+        });
+
+        const scrolled = new Gtk.ScrolledWindow({
+            hexpand: true,
+            vexpand: true,
+            min_content_height: 300,
+        });
+
+        const textView = new Gtk.TextView({
+            wrap_mode: Gtk.WrapMode.WORD_CHAR,
+            monospace: true,
+            top_margin: 8,
+            bottom_margin: 8,
+            left_margin: 8,
+            right_margin: 8,
+        });
+        const buffer = textView.get_buffer();
+        buffer.set_text(initialText, -1);
+        scrolled.set_child(textView);
+        content.append(scrolled);
+
+        const actions = new Gtk.Box({
+            orientation: Gtk.Orientation.HORIZONTAL,
+            spacing: 8,
+            halign: Gtk.Align.END,
+        });
+
+        const cancelButton = new Gtk.Button({ label: _('Cancel') });
+        cancelButton.connect('clicked', () => dialog.close());
+
+        const saveButton = new Gtk.Button({
+            label: _('Save'),
+            css_classes: ['suggested-action'],
+        });
+        saveButton.connect('clicked', () => {
+            const [start, end] = buffer.get_bounds();
+            onSave(buffer.get_text(start, end, false));
+            dialog.close();
+        });
+
+        actions.append(cancelButton);
+        actions.append(saveButton);
+        content.append(actions);
+
+        dialog.set_child(content);
+        dialog.present();
     }
 
     _addShortcutCaptureRow(window, group, settings, key, title, subtitle) {
