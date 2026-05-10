@@ -31,7 +31,7 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
             'curl -fsSL "$REPO/openwispr-engine.service" -o ~/.config/systemd/user/openwispr-engine.service',
             'curl -fsSL "$REPO/openwispr-hotkeyd.service" -o ~/.config/systemd/user/openwispr-hotkeyd.service',
             'curl -fsSL "$REPO/io.github.tnfssc.openwispr.desktop" -o ~/.local/share/applications/io.github.tnfssc.openwispr.desktop',
-            'curl -fsSL "$REPO/logo.png" -o ~/.local/share/icons/hicolor/256x256/apps/io.github.tnfssc.openwispr.png',
+            'curl -fsSL "$REPO/openwispr.png" -o ~/.local/share/icons/hicolor/256x256/apps/io.github.tnfssc.openwispr.png',
             'systemctl --user daemon-reload',
             'systemctl --user enable --now openwispr-engine.service',
         ].join('; ');

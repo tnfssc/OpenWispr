@@ -114,7 +114,7 @@ jobs:
             companion/openwispr-engine.service
             companion/openwispr-hotkeyd.service
             companion/io.github.tnfssc.openwispr.desktop
-            logo.png
+            openwispr.png
           if-no-files-found: error
 
       - name: Attach zip to GitHub Release
@@ -134,5 +134,5 @@ jobs:
             companion/openwispr-engine.service \
             companion/openwispr-hotkeyd.service \
             companion/io.github.tnfssc.openwispr.desktop \
-            logo.png \
+            openwispr.png \
             --clobber
