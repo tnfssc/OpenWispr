@@ -30,7 +30,8 @@ Also checkout [OpenWispr for macOS](https://github.com/tnfssc/OpenWispr)
 Before installing, ensure you have the following dependencies:
 
 1.  **GNOME Shell**: Supported versions 45 - 50.
-2.  **whisper-cli**: The command-line interface for the Whisper model.
+2.  **whisper-cli** (local STT only): The command-line interface for the Whisper model.
+    *   Required only if you choose local transcription. Skip it if you use Remote STT via OpenAI or Groq below.
     *   Ensure `whisper-cli` is installed and available in your system `PATH`.
     *   *Note: This extension expects the `whisper-cli` binary specifically.*
 3.  **ffmpeg**: Required for silence trimming.
@@ -88,7 +89,7 @@ Use this path if you want on-device transcription.
     ```
 
 5.  **Download a GGML-compatible model**
-    Local transcription requires a Whisper model file. Download one and place it in `extension/models/`.
+    After cloning the repository and switching into the project root during installation, download a Whisper model file into `extension/models/`.
 
     ```bash
     mkdir -p extension/models

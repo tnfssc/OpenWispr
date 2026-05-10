@@ -169,6 +169,7 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         const currentSttProvider = this._normalizeProvider(settings.get_string('stt-provider'));
         const sttIndex = sttProviderOptions.findIndex(option => option.id === currentSttProvider);
         sttProviderRow.selected = sttIndex >= 0 ? sttIndex : 0;
+        sttGroup.add(sttProviderRow);
 
         const sttOpenAiEndpointRow = this._addEntryRow(sttGroup, settings, 'stt-openai-endpoint', _('OpenAI STT Endpoint'));
         const sttOpenAiModelRow = this._addEntryRow(sttGroup, settings, 'stt-openai-model', _('OpenAI STT Model'));
@@ -195,7 +196,6 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
             settings.set_string('stt-provider', selected.id);
             updateSttProviderVisibility(selected.id);
         });
-        sttGroup.add(sttProviderRow);
 
         const llmGroup = new Adw.PreferencesGroup({ title: _('LLM Cleanup') });
         page.add(llmGroup);
@@ -221,6 +221,7 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         const currentLlmProvider = this._normalizeProvider(settings.get_string('llm-provider'));
         const llmIndex = llmProviderOptions.findIndex(option => option.id === currentLlmProvider);
         llmProviderRow.selected = llmIndex >= 0 ? llmIndex : 0;
+        llmGroup.add(llmProviderRow);
 
         const llmOpenAiEndpointRow = this._addEntryRow(llmGroup, settings, 'llm-openai-endpoint', _('OpenAI LLM Endpoint'));
         const llmOpenAiModelRow = this._addEntryRow(llmGroup, settings, 'llm-openai-model', _('OpenAI LLM Model'));
@@ -247,7 +248,6 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
             settings.set_string('llm-provider', selected.id);
             updateLlmProviderVisibility(selected.id);
         });
-        llmGroup.add(llmProviderRow);
 
         this._addMultilineEditorRow(
             window,
