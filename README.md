@@ -4,6 +4,8 @@
 
 Also checkout [OpenWispr for macOS](https://github.com/tnfssc/OpenWispr)
 
+<img width="160" alt="openwispr logo" src="./openwispr.png" />
+
 **openwispr-gnome-extension** is an AI-powered voice-to-text dictation extension for GNOME Shell. It leverages local AI models (via `whisper-cli`) to provide private, fast, and accurate speech recognition directly into any application.
 
 <img width="429" height="255" alt="screenshot" src="https://github.com/user-attachments/assets/6a1856a2-228f-434a-8319-5386ec1b4cf0" />
@@ -27,7 +29,7 @@ Also checkout [OpenWispr for macOS](https://github.com/tnfssc/OpenWispr)
 
 Before installing, ensure you have the following dependencies:
 
-1.  **GNOME Shell**: Supported versions 45 - 49.
+1.  **GNOME Shell**: Supported versions 45 - 50.
 2.  **whisper-cli**: The command-line interface for the Whisper model.
     *   Ensure `whisper-cli` is installed and available in your system `PATH`.
     *   *Note: This extension expects the `whisper-cli` binary specifically.*
@@ -104,7 +106,7 @@ install -Dm755 "$TMP/$BIN" ~/.local/bin/openwispr
 curl -fsSL "$REPO/openwispr-engine.service" -o ~/.config/systemd/user/openwispr-engine.service
 curl -fsSL "$REPO/openwispr-hotkeyd.service" -o ~/.config/systemd/user/openwispr-hotkeyd.service
 curl -fsSL "$REPO/io.github.tnfssc.openwispr.desktop" -o ~/.local/share/applications/io.github.tnfssc.openwispr.desktop
-curl -fsSL "$REPO/logo.png" -o ~/.local/share/icons/hicolor/256x256/apps/io.github.tnfssc.openwispr.png
+curl -fsSL "$REPO/openwispr.png" -o ~/.local/share/icons/hicolor/256x256/apps/io.github.tnfssc.openwispr.png
 
 systemctl --user daemon-reload
 systemctl --user enable --now openwispr-engine.service
@@ -174,7 +176,7 @@ cp companion/openwispr-hotkeyd.service ~/.config/systemd/user/
 mkdir -p ~/.local/share/applications
 cp companion/io.github.tnfssc.openwispr.desktop ~/.local/share/applications/
 mkdir -p ~/.local/share/icons/hicolor/256x256/apps
-cp logo.png ~/.local/share/icons/hicolor/256x256/apps/io.github.tnfssc.openwispr.png
+cp openwispr.png ~/.local/share/icons/hicolor/256x256/apps/io.github.tnfssc.openwispr.png
 systemctl --user daemon-reload
 systemctl --user enable --now openwispr-engine.service
 systemctl --user enable --now openwispr-hotkeyd.service
