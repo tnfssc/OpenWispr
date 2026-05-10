@@ -14,7 +14,7 @@ Also checkout [OpenWispr for macOS](https://github.com/tnfssc/OpenWispr)
 
 - **Local or Remote Processing**: Use local `whisper-cli` or remote STT endpoints (OpenAI/Groq), configurable per setup.
 - **Optional Keyboard Shortcuts**: Configure your own shortcut for toggle recording in preferences.
-- **Hold to Speak**: Optional mode to hold `Ctrl+Alt+T` to record and release to transcribe.
+- **Hold to Speak**: Optional mode you can bind in preferences to record while held and transcribe on release.
 - **Silence Cutting**: Uses `ffmpeg` to cut silent parts before transcription.
 - **Configurable STT Backends**: Choose local `whisper-cli`, OpenAI Whisper endpoint, or Groq endpoint.
 - **LLM Transcript Cleanup**: Optionally post-process transcript text with OpenAI or Groq models.
@@ -132,9 +132,9 @@ Use this path if you want to skip local Whisper binaries and models.
 
 1.  **Start Dictation**: Click the microphone icon in the top bar, or set a custom keyboard shortcut in preferences.
     *   The icon will change to a recording indicator.
-    *   You can also hold `Ctrl+Alt+T`.
+    *   Hold-to-speak is available after you assign a shortcut in preferences.
 2.  **Speak**: Dictate your text clearly.
-3.  **Stop & Transcribe**: Press `Ctrl+Alt+R` again to stop.
+3.  **Stop & Transcribe**: Click the indicator again or trigger the same shortcut you configured.
     *   If using hold-to-speak, just release the hold key/chord.
     *   The extension trims silence with ffmpeg (if enabled), transcribes, then optionally runs LLM cleanup.
     *   Once complete, the text will be automatically pasted into your active window and copied to your clipboard.
@@ -277,7 +277,7 @@ Note: the GitHub Release companion binaries are built with `CGO_ENABLED=0` for p
 
 ## Configuration
 
-The extension ships with a default toggle shortcut. You can change it in preferences, with `dconf-editor`, or by modifying the schema:
+The extension does not ship with default recording shortcuts. Configure them in preferences, with `dconf-editor`, or by modifying the schema:
 *   **Schema**: `org.gnome.shell.extensions.openwispr`
 *   **Key**: `toggle-recording`
 

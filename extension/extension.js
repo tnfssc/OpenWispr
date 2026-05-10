@@ -76,13 +76,14 @@ class OpenWisprController {
 
     enable() {
         this._settings = this.getSettings();
-        this._migrateLegacyProviderNames();
+        this._migrateLegacySettings();
         this._resetState();
+        this._clipboardRestoreSourceIds = new Set();
         this._holdKeyPressed = false;
         this._holdStartCooldownUntilUs = 0;
         this._holdToSpeakEnabled = this._settings.get_boolean('hold-to-speak-enabled');
         this._holdToSpeakBinding = this._parseAccelerator(
-            this._settings.get_strv('hold-to-speak-keybinding')[0] || '<Control><Alt>t'
+            this._settings.get_strv('hold-to-speak-keybinding')[0] || ''
         );
         this._autoPasteEnabled = this._settings.get_boolean('auto-paste-enabled');
         this._restoreClipboardEnabled = this._settings.get_boolean('restore-clipboard-enabled');
@@ -192,7 +193,7 @@ class OpenWisprController {
 
         this._holdToSpeakBindingChangedId = this._settings.connect('changed::hold-to-speak-keybinding', () => {
             this._holdToSpeakBinding = this._parseAccelerator(
-                this._settings.get_strv('hold-to-speak-keybinding')[0] || '<Control><Alt>t'
+                this._settings.get_strv('hold-to-speak-keybinding')[0] || ''
             );
         });
 
@@ -205,6 +206,7 @@ class OpenWisprController {
 
     disable() {
         this._stopRecording(false); // Force stop without transcription if disabling
+        this._clearClipboardRestoreSources();
 
         if (this._capturedEventId) {
             global.stage.disconnect(this._capturedEventId);
@@ -261,6 +263,17 @@ class OpenWisprController {
 
         Main.wm.removeKeybinding('toggle-recording');
         this._settings = null;
+    }
+
+    _clearClipboardRestoreSources() {
+        if (!this._clipboardRestoreSourceIds)
+            return;
+
+        for (const sourceId of this._clipboardRestoreSourceIds)
+            GLib.Source.remove(sourceId);
+
+        this._clipboardRestoreSourceIds.clear();
+        this._clipboardRestoreSourceIds = null;
     }
 
     Toggle(source) {
@@ -646,7 +659,7 @@ class OpenWisprController {
         return provider;
     }
 
-    _migrateLegacyProviderNames() {
+    _migrateLegacySettings() {
         const sttProvider = this._settings.get_string('stt-provider');
         if (sttProvider === 'grok')
             this._settings.set_string('stt-provider', 'groq');
@@ -654,15 +667,6 @@ class OpenWisprController {
         const llmProvider = this._settings.get_string('llm-provider');
         if (llmProvider === 'grok')
             this._settings.set_string('llm-provider', 'groq');
-
-        const holdBinding = this._settings.get_strv('hold-to-speak-keybinding');
-        const currentHoldBinding = holdBinding[0] || '';
-        if (!currentHoldBinding || currentHoldBinding === '<Control><Alt>space')
-            this._settings.set_strv('hold-to-speak-keybinding', ['<Control><Alt>t']);
-
-        const holdTrigger = this._settings.get_string('hold-to-speak-trigger');
-        if (!holdTrigger || holdTrigger === 'ctrl-alt-space')
-            this._settings.set_string('hold-to-speak-trigger', 'ctrl-alt-t');
 
         const llmPrompt = this._settings.get_string('llm-cleanup-prompt');
         const legacyPrompts = [
@@ -724,7 +728,9 @@ class OpenWisprController {
             
             // Restore original clipboard after a short delay to ensure paste completes
             if (this._restoreClipboardEnabled && originalClipboard !== null) {
-                GLib.timeout_add(GLib.PRIORITY_DEFAULT, CLIPBOARD_RESTORE_DELAY_MS, () => {
+                const sourceId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, CLIPBOARD_RESTORE_DELAY_MS, () => {
+                    this._clipboardRestoreSourceIds?.delete(sourceId);
+
                     try {
                         // Check if clipboard still contains our transcription text (guardrail)
                         clipboard.get_text(St.ClipboardType.CLIPBOARD, (_cb, currentClipboard) => {
@@ -742,6 +748,8 @@ class OpenWisprController {
                     }
                     return GLib.SOURCE_REMOVE;
                 });
+
+                this._clipboardRestoreSourceIds?.add(sourceId);
             }
             
         } catch (e) {

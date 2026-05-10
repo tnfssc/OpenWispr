@@ -6,11 +6,11 @@
       <summary>Enable hold to speak mode</summary>
     </key>
     <key name="hold-to-speak-trigger" type="s">
-      <default>'ctrl-alt-t'</default>
+      <default>''</default>
       <summary>Legacy hold to speak trigger key</summary>
     </key>
     <key name="hold-to-speak-keybinding" type="as">
-      <default><![CDATA[['<Control><Alt>t']]]></default>
+      <default>[]</default>
       <summary>Legacy hold to speak keybinding</summary>
     </key>
     <key name="auto-paste-enabled" type="b">
@@ -102,7 +102,7 @@
       <summary>Prompt used for LLM transcript cleanup</summary>
     </key>
     <key name="toggle-recording" type="as">
-      <default><![CDATA[['<Control><Alt>r']]]></default>
+      <default>[]</default>
       <summary>Toggle recording</summary>
     </key>
   </schema>

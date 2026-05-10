@@ -71,12 +71,11 @@ try {
     print("PASS: Successfully initialized Gio.Settings with the schema.");
 
     const toggleShortcut = defaultValue(schema, 'toggle-recording');
-    assertTrue(toggleShortcut.length > 0, "'toggle-recording' has a default shortcut");
-    assertEqual(toggleShortcut[0], '<Control><Alt>r', "'toggle-recording' default");
+    assertEqual(toggleShortcut.length, 0, "'toggle-recording' default is empty");
 
     assertEqual(defaultValue(schema, 'hold-to-speak-enabled'), true, "'hold-to-speak-enabled' default");
-    assertEqual(defaultValue(schema, 'hold-to-speak-trigger'), 'ctrl-alt-t', "'hold-to-speak-trigger' default");
-    assertEqual(defaultValue(schema, 'hold-to-speak-keybinding')[0], '<Control><Alt>t', "'hold-to-speak-keybinding' default");
+    assertEqual(defaultValue(schema, 'hold-to-speak-trigger'), '', "'hold-to-speak-trigger' default");
+    assertEqual(defaultValue(schema, 'hold-to-speak-keybinding').length, 0, "'hold-to-speak-keybinding' default is empty");
 
     assertEqual(defaultValue(schema, 'auto-paste-enabled'), true, "'auto-paste-enabled' default");
     assertEqual(defaultValue(schema, 'restore-clipboard-enabled'), true, "'restore-clipboard-enabled' default");
