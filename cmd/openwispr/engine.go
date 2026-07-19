@@ -221,7 +221,7 @@ func (e *recorderEngine) removeCancel(token string) {
 // readSecret reads an API key from the extension's GSettings schema. Secrets
 // are never transported over the session D-Bus bus; the engine reads them
 // directly from dconf via gsettings, which is always present on GNOME.
-func readSecret(key string) (string, error) {
+var readSecret = func(key string) (string, error) {
 	out, err := exec.Command("gsettings", "get", gsettingsSchema, key).Output()
 	if err != nil {
 		return "", fmt.Errorf("read gsettings key %s: %w", key, err)
