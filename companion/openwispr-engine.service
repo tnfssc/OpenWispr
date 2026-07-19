@@ -1,12 +1,45 @@
 [Unit]
 Description=openwispr transcription engine
+PartOf=graphical-session.target
 After=graphical-session.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
-Type=simple
+Type=dbus
+BusName=io.github.tnfssc.OpenWispr.Recorder
 ExecStart=%h/.local/bin/openwispr engine
+WorkingDirectory=%h
+Environment="PATH=/usr/local/bin:/usr/bin:/bin:%h/.local/bin"
 Restart=on-failure
 RestartSec=2
+TimeoutStopSec=10s
+
+# --- Hardening ---
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadWritePaths=%h/.config %h/.cache
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectClock=true
+ProtectHostname=true
+ProtectControlGroups=true
+ProtectProc=invisible
+RemoveIPC=true
+UMask=077
+PrivateDevices=true
 
 [Install]
-WantedBy=default.target
+WantedBy=graphical-session.target
