@@ -602,6 +602,11 @@ class OpenWisprController {
         const payload = this._buildCompanionConfig();
         const params = new GLib.Variant('(bs)', [Boolean(transcribe), payload]);
 
+        // openwispr: async Stop contract — Stop returns a token immediately;
+        // the transcript arrives later via the TranscriptionComplete signal.
+        // The callback only registers the pending token; delivery happens in
+        // _onCompanionSignal. When transcribe is false, no signal is emitted
+        // and the caller resets state from the reply directly.
         proxy.call(
             'Stop',
             params,
@@ -611,37 +616,70 @@ class OpenWisprController {
             (dbusProxy, res) => {
                 try {
                     const result = dbusProxy.call_finish(res);
-                    const [stopped, transcript] = result.deep_unpack();
+                    const [token] = result.deep_unpack();
 
-                    if (!stopped) {
-                        this._notifyError('Companion service could not stop recording.');
+                    if (!token) {
+                        // Nothing was recording — nothing to wait for.
                         this._resetState();
                         return;
                     }
 
-                    if (transcribe) {
-                        const finalText = (transcript || '').trim();
-                        if (DEBUG_TRANSCRIPTS)
-                            this._debug(`Text: ${finalText}`);
-                        else
-                            this._debug(`Text received (${finalText.length} chars)`);
-
-                        if (finalText) {
-                            this._notify(`Transcribed: ${finalText}`);
-                            this._injectText(finalText);
-                        } else {
-                            this._notify('No speech detected.');
-                        }
+                    if (!transcribe) {
+                        // Stop without transcription — no signal expected.
+                        this._resetState();
+                        return;
                     }
+
+                    // transcribe=true — wait for the TranscriptionComplete signal.
+                    this._pendingTranscription = { token, transcribe };
                 } catch (e) {
                     console.error(`[openwispr-gnome-extension] Companion stop failed: ${e}`);
                     this._notifyError('Companion transcription failed.');
                     this._companionProxy = null;
+                    this._resetState();
                 }
-
-                this._resetState();
             }
         );
+    }
+
+    // openwispr: async Stop contract — handles TranscriptionComplete(token,
+    // transcript, err) emitted by the companion engine after the pipeline
+    // finishes. The token is matched against the pending in-flight stop.
+    _onCompanionSignal(proxy, signalName, params) {
+        if (signalName !== 'TranscriptionComplete')
+            return;
+
+        const [token, transcript, errStr] = params.deep_unpack();
+
+        if (!this._pendingTranscription || this._pendingTranscription.token !== token)
+            return;
+
+        const { transcribe } = this._pendingTranscription;
+        this._pendingTranscription = null;
+
+        if (errStr) {
+            console.error(`[openwispr-gnome-extension] Companion transcription failed: ${errStr}`);
+            this._notifyError('Companion transcription failed.');
+            this._resetState();
+            return;
+        }
+
+        if (transcribe) {
+            const finalText = (transcript || '').trim();
+            if (DEBUG_TRANSCRIPTS)
+            this._debug(`Text: ${finalText}`);
+            else
+                this._debug(`Text received (${finalText.length} chars)`);
+
+            if (finalText) {
+                this._notify(`Transcribed: ${finalText}`);
+                this._injectText(finalText);
+            } else {
+                this._notify('No speech detected.');
+            }
+        }
+
+        this._resetState();
     }
 
     _getCompanionProxy() {
@@ -677,6 +715,12 @@ class OpenWisprController {
                 }
             });
 
+            // openwispr: signal connection setup — listen for TranscriptionComplete
+            // emitted by the companion engine after async Stop pipeline completion.
+            proxy.connect('g-signal',
+                (p, _senderName, signalName, signalParams) =>
+                    this._onCompanionSignal(p, signalName, signalParams));
+
             this._companionProxy = proxy;
             return this._companionProxy;
         } catch (e) {
@@ -698,18 +742,14 @@ class OpenWisprController {
             sttProvider,
             sttOpenAIEndpoint: this._settings.get_string('stt-openai-endpoint'),
             sttOpenAIModel: this._settings.get_string('stt-openai-model'),
-            sttOpenAIApiKey: this._settings.get_string('stt-openai-api-key'),
             sttGroqEndpoint: this._settings.get_string('stt-groq-endpoint'),
             sttGroqModel: this._settings.get_string('stt-groq-model'),
-            sttGroqApiKey: this._settings.get_string('stt-groq-api-key'),
             llmFilterEnabled: this._settings.get_boolean('llm-filter-enabled'),
             llmProvider,
             llmOpenAIEndpoint: this._settings.get_string('llm-openai-endpoint'),
             llmOpenAIModel: this._settings.get_string('llm-openai-model'),
-            llmOpenAIApiKey: this._settings.get_string('llm-openai-api-key'),
             llmGroqEndpoint: this._settings.get_string('llm-groq-endpoint'),
             llmGroqModel: this._settings.get_string('llm-groq-model'),
-            llmGroqApiKey: this._settings.get_string('llm-groq-api-key'),
             llmCleanupPrompt: this._settings.get_string('llm-cleanup-prompt'),
         };
 
