@@ -176,7 +176,7 @@ func runEngine(conn *dbus.Conn) error {
 // Only Shell is permitted to drive the recorder; any other session process is
 // rejected. The GNOME Shell well-known name (org.gnome.Shell) is resolved to a
 // PID via the bus daemon and compared against the caller's PID.
-func (e *recorderEngine) authorize(msg *dbus.Message) error {
+func (e *recorderEngine) authorize(msg dbus.Message) error {
 	if e.conn == nil {
 		return errors.New("openwispr: dbus connection not initialized")
 	}
@@ -239,7 +239,7 @@ var readSecret = func(key string) (string, error) {
 // Start is the D-Bus method that begins audio capture via ffmpeg. It returns
 // true if recording started, false if a recording or transcription was already
 // in progress. Returns a *dbus.Error if ffmpeg is missing or fails to start.
-func (e *recorderEngine) Start(msg *dbus.Message) (bool, *dbus.Error) {
+func (e *recorderEngine) Start(msg dbus.Message) (bool, *dbus.Error) {
 	if err := e.authorize(msg); err != nil {
 		return false, dbus.MakeFailedError(err)
 	}
@@ -295,7 +295,7 @@ func (e *recorderEngine) Start(msg *dbus.Message) (bool, *dbus.Error) {
 // TranscriptionComplete(token, transcript, err) signal is emitted on
 // completion. When transcribe is false, no signal is emitted; the caller
 // resets state from the reply. Returns an empty token if nothing was recording.
-func (e *recorderEngine) Stop(msg *dbus.Message, transcribe bool, configJSON string) (string, *dbus.Error) {
+func (e *recorderEngine) Stop(msg dbus.Message, transcribe bool, configJSON string) (string, *dbus.Error) {
 	if err := e.authorize(msg); err != nil {
 		return "", dbus.MakeFailedError(err)
 	}
@@ -373,7 +373,7 @@ func (e *recorderEngine) Stop(msg *dbus.Message, transcribe bool, configJSON str
 // pipeline has already completed. Full cancellation requires context
 // propagation into the pipeline (added separately); the method surface and
 // per-token cancel map are stable here.
-func (e *recorderEngine) Cancel(msg *dbus.Message, token string) *dbus.Error {
+func (e *recorderEngine) Cancel(msg dbus.Message, token string) *dbus.Error {
 	if err := e.authorize(msg); err != nil {
 		return dbus.MakeFailedError(err)
 	}
