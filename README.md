@@ -93,7 +93,7 @@ Use this path if you want on-device transcription.
 
     ```bash
     mkdir -p extension/models
-    # Example: Download base.en model (adjust URL as needed for your preferred model source)
+    # Download the base.en model (the extension expects this exact filename: ggml-base.en.bin)
     wget https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin -O extension/models/ggml-base.en.bin
     ```
 
@@ -142,6 +142,8 @@ Use this path if you want to skip local Whisper binaries and models.
 ### Companion CLI
 
 The installer builds `~/.local/bin/openwispr` (when `go` is installed).
+
+> **Note:** Without `go`, `install.sh` skips the companion binary, service files, and engine enablement. Use the [Install Companion From GitHub Releases](#install-companion-from-github-releases) path below to get a prebuilt binary.
 
 ### Install Companion From GitHub Releases
 
@@ -225,6 +227,12 @@ openwispr daemon --backend auto --trigger <Super>z --evdev-key z
 
 `auto` tries the portal backend first, then falls back to evdev if needed.
 
+To target a specific input device when falling back to evdev, pass `--device`:
+
+```bash
+openwispr daemon --backend auto --trigger <Super>z --evdev-key z --device /dev/input/eventX
+```
+
 If you switch to modifier-only triggers (like `Alt_R`) and release detection is unreliable, GNOME may emit `Activated` without `Deactivated`.
 
 To install/update the service manually:
@@ -262,6 +270,14 @@ Quick self-heal command (recommended):
 
 ```bash
 openwispr restart
+```
+
+`openwispr restart` restarts the openwispr services AND `xdg-desktop-portal-gnome`/`xdg-desktop-portal` AND reloads the GNOME Shell extension. Use when portal/shortcut state is wedged; expect other portal consumers (file picker, screencast) to be briefly interrupted.
+
+To restart services without reloading the GNOME extension:
+
+```bash
+openwispr restart --no-extension-reload
 ```
 
 If evdev fallback is needed, ensure input permissions (example for current user):
@@ -316,6 +332,8 @@ Remote STT and LLM keys/endpoints are configurable in extension preferences. Rel
 *   **LLM**: `llm-filter-enabled`, `llm-provider`, `llm-openai-*`, `llm-groq-*`, `llm-cleanup-prompt`
 *   **FFmpeg**: `silence-trim-enabled`, `silence-threshold`, `silence-duration`
 
+> **Security:** API keys are stored in plaintext in GSettings/dconf (`~/.config/dconf/user`). Do not use shared or production keys. Restrict dconf access accordingly.
+
 ## Testing
 
 LLM cleanup unit tests (request payload + response parsing):
@@ -347,4 +365,4 @@ go test -tags=integration ./cmd/openwispr -run TestLivePromptBenchmarkGroq -v
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE.md) file for details.
