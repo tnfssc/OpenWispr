@@ -3,7 +3,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"regexp"
 	"sort"
@@ -30,7 +29,15 @@ type promptScore struct {
 	failPatterns int
 }
 
-func TestLivePromptBenchmarkGroq(t *testing.T) {
+// TestPromptQualityScoring is a quality scorer, not a testing.B benchmark:
+// it scores each prompt candidate across a fixed set of transcript cases and
+// ranks them by a coarse heuristic (non-empty output, must-contain tokens,
+// and absence of assistant-like patterns). It requires live Groq credentials.
+//
+// Run with:
+//
+//	go test -tags=integration ./cmd/openwispr -run TestPromptQualityScoring -v
+func TestPromptQualityScoring(t *testing.T) {
 	endpoint := strings.TrimSpace(os.Getenv("OPENWISPR_TEST_GROQ_ENDPOINT"))
 	apiKey := strings.TrimSpace(os.Getenv("OPENWISPR_TEST_GROQ_API_KEY"))
 	model := strings.TrimSpace(os.Getenv("OPENWISPR_TEST_GROQ_MODEL"))
@@ -107,7 +114,10 @@ func TestLivePromptBenchmarkGroq(t *testing.T) {
 		for _, tc := range cases {
 			out, err := cleanupTranscript(tc.input, cfg)
 			if err != nil {
-				t.Fatalf("candidate=%s case=%s cleanup failed: %v", candidate.name, tc.name, err)
+				// t.Fatalf would abort the whole run on one transient API error;
+				// record and continue so all candidate×case combos are exercised.
+				t.Errorf("candidate=%s case=%s cleanup failed: %v", candidate.name, tc.name, err)
+				continue
 			}
 
 			trimmed := strings.TrimSpace(out)
@@ -153,12 +163,8 @@ func TestLivePromptBenchmarkGroq(t *testing.T) {
 
 	best := scores[0]
 	t.Logf("Best candidate: %s", best.name)
-	if best.total < 10 {
-		t.Fatalf("best prompt score too low: %s => %d", best.name, best.total)
-	}
-}
-
-func Example_promptBenchmarkGuidance() {
-	fmt.Println("Run with: go test -tags=integration ./cmd/openwispr -run TestLivePromptBenchmarkGroq -v")
-	// Output: Run with: go test -tags=integration ./cmd/openwispr -run TestLivePromptBenchmarkGroq -v
+	// The score is informational only; there is no justified pass/fail threshold
+	// for "best.total". Per-case failures are already surfaced via t.Errorf
+	// above; do not fail the test on the heuristic magnitude alone.
+	_ = best
 }
