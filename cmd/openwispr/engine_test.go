@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -97,7 +98,7 @@ func TestCleanupTranscriptOpenAIRequest(t *testing.T) {
 		LLMCleanupPrompt:  "test prompt",
 	}
 
-	got, err := cleanupTranscript("raw transcript", cfg)
+	got, err := cleanupTranscript(context.Background(), "raw transcript", cfg)
 	if err != nil {
 		t.Fatalf("cleanupTranscript returned error: %v", err)
 	}
@@ -186,7 +187,7 @@ func TestCleanupTranscriptGroqRoutingAndFailure(t *testing.T) {
 	}
 
 	original := "leave this as fallback"
-	got, err := cleanupTranscript(original, cfg)
+	got, err := cleanupTranscript(context.Background(), original, cfg)
 	if err == nil {
 		t.Fatal("expected cleanupTranscript to fail on HTTP 500")
 	}
