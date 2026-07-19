@@ -11,6 +11,7 @@ import { Extension, gettext as _ } from 'resource:///org/gnome/shell/extensions/
 
 // Constants
 const DEBUG_LOGS = false;
+const DEBUG_TRANSCRIPTS = false;
 const CLIPBOARD_RESTORE_DELAY_MS = 100;
 const DBUS_CONTROL_BUS_NAME = 'org.gnome.Shell.Extensions.OpenWispr';
 const DBUS_CONTROL_PATH = '/org/gnome/Shell/Extensions/OpenWispr';
@@ -116,7 +117,7 @@ class OpenWisprController {
         this._indicator.add_child(this._icon);
         
         // Click to toggle
-        this._indicator.connect('button-press-event', () => {
+        this._indicatorClickId = this._indicator.connect('button-press-event', () => {
             this._toggleRecording();
             return Clutter.EVENT_PROPAGATE;
         });
@@ -173,6 +174,7 @@ class OpenWisprController {
         );
 
         this._holdToSpeakChangedId = this._settings.connect('changed::hold-to-speak-enabled', () => {
+            if (this._enabled === false) return;
             this._holdToSpeakEnabled = this._settings.get_boolean('hold-to-speak-enabled');
 
             if (!this._holdToSpeakEnabled) {
@@ -184,20 +186,24 @@ class OpenWisprController {
         });
 
         this._autoPasteChangedId = this._settings.connect('changed::auto-paste-enabled', () => {
+            if (this._enabled === false) return;
             this._autoPasteEnabled = this._settings.get_boolean('auto-paste-enabled');
         });
 
         this._restoreClipboardChangedId = this._settings.connect('changed::restore-clipboard-enabled', () => {
+            if (this._enabled === false) return;
             this._restoreClipboardEnabled = this._settings.get_boolean('restore-clipboard-enabled');
         });
 
         this._holdToSpeakBindingChangedId = this._settings.connect('changed::hold-to-speak-keybinding', () => {
+            if (this._enabled === false) return;
             this._holdToSpeakBinding = this._parseAccelerator(
                 this._settings.get_strv('hold-to-speak-keybinding')[0] || ''
             );
         });
 
         this._notificationsChangedId = this._settings.connect('changed::notifications-enabled', () => {
+            if (this._enabled === false) return;
             this._notificationsEnabled = this._settings.get_boolean('notifications-enabled');
         });
 
@@ -239,6 +245,10 @@ class OpenWisprController {
         }
         
         if (this._indicator) {
+            if (this._indicatorClickId) {
+                this._indicator.disconnect(this._indicatorClickId);
+                this._indicatorClickId = null;
+            }
             this._indicator.destroy();
             this._indicator = null;
         }
@@ -269,15 +279,38 @@ class OpenWisprController {
         if (!this._clipboardRestoreSourceIds)
             return;
 
-        for (const sourceId of this._clipboardRestoreSourceIds)
-            GLib.Source.remove(sourceId);
+        for (const sourceId of this._clipboardRestoreSourceIds) {
+            try {
+                GLib.Source.remove(sourceId);
+            } catch (e) {
+                // Source already fired or removed; safe to ignore.
+            }
+        }
 
         this._clipboardRestoreSourceIds.clear();
         this._clipboardRestoreSourceIds = null;
     }
 
+    _validateSource(source) {
+        // D-Bus callers can pass arbitrary strings; constrain to a small
+        // allowlist so we never persist an opaque/unbounded value.
+        if (typeof source !== 'string')
+            return null;
+        const trimmed = source.trim();
+        if (trimmed.length === 0 || trimmed.length > 64)
+            return null;
+        const ALLOWED_SOURCES = ['external', 'hotkeyd', 'evdev'];
+        if (ALLOWED_SOURCES.includes(trimmed) || trimmed.startsWith('portal:'))
+            return trimmed;
+        return null;
+    }
+
     Toggle(source) {
-        const triggerSource = source || 'external';
+        const triggerSource = this._validateSource(source);
+        if (triggerSource === null) {
+            this._debug(`Rejecting DBus toggle from unknown source: ${source}`);
+            return false;
+        }
 
         if (this._recording) {
             this._debug(`DBus toggle stop requested by ${triggerSource}`);
@@ -294,7 +327,11 @@ class OpenWisprController {
     }
 
     Start(source) {
-        const triggerSource = source || 'external';
+        const triggerSource = this._validateSource(source);
+        if (triggerSource === null) {
+            this._debug(`Rejecting DBus start from unknown source: ${source}`);
+            return false;
+        }
 
         if (this._recording || this._processing)
             return false;
@@ -306,7 +343,11 @@ class OpenWisprController {
     }
 
     Stop(transcribe, source) {
-        const triggerSource = source || 'external';
+        const triggerSource = this._validateSource(source);
+        if (triggerSource === null) {
+            this._debug(`Rejecting DBus stop from unknown source: ${source}`);
+            return false;
+        }
 
         if (!this._recording)
             return false;
@@ -580,7 +621,10 @@ class OpenWisprController {
 
                     if (transcribe) {
                         const finalText = (transcript || '').trim();
-                        this._debug(`Text: ${finalText}`);
+                        if (DEBUG_TRANSCRIPTS)
+                            this._debug(`Text: ${finalText}`);
+                        else
+                            this._debug(`Text received (${finalText.length} chars)`);
 
                         if (finalText) {
                             this._notify(`Transcribed: ${finalText}`);
@@ -605,7 +649,7 @@ class OpenWisprController {
             return this._companionProxy;
 
         try {
-            this._companionProxy = Gio.DBusProxy.new_for_bus_sync(
+            const proxy = Gio.DBusProxy.new_for_bus_sync(
                 Gio.BusType.SESSION,
                 Gio.DBusProxyFlags.NONE,
                 null,
@@ -614,6 +658,26 @@ class OpenWisprController {
                 COMPANION_INTERFACE,
                 null
             );
+
+            // new_for_bus_sync succeeds even when no service is running; the
+            // proxy simply has no name owner. Treat that as unavailable so
+            // callers can surface a user-facing error.
+            if (!proxy.get_name_owner()) {
+                console.error('[openwispr-gnome-extension] Companion DBus service has no name owner');
+                this._companionProxy = null;
+                return null;
+            }
+
+            // Invalidate the cache and reset recording state if the companion
+            // vanishes mid-recording, so we never hold a stale proxy.
+            proxy.connect('notify::g-name-owner', () => {
+                if (!proxy.get_name_owner()) {
+                    this._companionProxy = null;
+                    this._resetState();
+                }
+            });
+
+            this._companionProxy = proxy;
             return this._companionProxy;
         } catch (e) {
             console.error(`[openwispr-gnome-extension] Failed to connect to companion DBus service: ${e}`);
@@ -699,6 +763,10 @@ class OpenWisprController {
     }
 
     _injectTextWithClipboard(text, originalClipboard) {
+        // disable() nulls state; never touch the clipboard after teardown.
+        if (this._enabled === false)
+            return;
+
         try {
             const clipboard = St.Clipboard.get_default();
             clipboard.set_text(St.ClipboardType.CLIPBOARD, text);
@@ -730,6 +798,11 @@ class OpenWisprController {
             if (this._restoreClipboardEnabled && originalClipboard !== null) {
                 const sourceId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, CLIPBOARD_RESTORE_DELAY_MS, () => {
                     this._clipboardRestoreSourceIds?.delete(sourceId);
+
+                    // The extension may have been disabled between scheduling
+                    // and firing; bail before touching the clipboard.
+                    if (this._enabled === false)
+                        return GLib.SOURCE_REMOVE;
 
                     try {
                         // Check if clipboard still contains our transcription text (guardrail)
