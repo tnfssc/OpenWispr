@@ -18,6 +18,15 @@ const DBUS_CONTROL_PATH = '/org/gnome/Shell/Extensions/OpenWispr';
 const COMPANION_BUS_NAME = 'io.github.tnfssc.OpenWispr.Recorder';
 const COMPANION_OBJECT_PATH = '/io/github/tnfssc/OpenWispr/Recorder';
 const COMPANION_INTERFACE = 'io.github.tnfssc.OpenWispr.Recorder';
+// TODO: extract to constants.js — DBUS_CONTROL_IFACE XML and DEFAULT_LLM_CLEANUP_PROMPT
+// are 50+ lines inline; move them to a dedicated constants module on a follow-up refactor.
+// Companion D-Bus call timeouts. Start must be quick (recorder spawn); Stop may run the
+// full pipeline (whisper + up to 240s HTTP transcription), so it gets a long ceiling.
+const COMPANION_START_TIMEOUT_MS = 15000;
+const COMPANION_STOP_TIMEOUT_MS = 300000;
+// Hold-to-speak: ignore keypresses this soon after a hold-release stop, to debounce
+// rapid re-press from the same physical key actuation.
+const HOLD_COOLDOWN_US = 750000;
 const DEFAULT_LLM_CLEANUP_PROMPT = `You are a deterministic transcript normalizer.
 
 Task:
@@ -76,9 +85,16 @@ class OpenWisprController {
     }
 
     enable() {
+        // Mark enabled BEFORE any async work. disable() and all async callbacks
+        // consult this flag to bail out of post-teardown work.
+        this._enabled = true;
         this._settings = this.getSettings();
+        // Migration MUST run before changed:: handlers are connected below: a
+        // legacy 'grok' provider/prompt would otherwise fire the changed::
+        // signal mid-migration and race with the handler read. Handlers also
+        // guard with `this._settings &&` since disable() nulls _settings.
         this._migrateLegacySettings();
-        this._resetState();
+        this._initState();
         this._clipboardRestoreSourceIds = new Set();
         this._holdKeyPressed = false;
         this._holdStartCooldownUntilUs = 0;
@@ -146,6 +162,9 @@ class OpenWisprController {
                 DBUS_CONTROL_BUS_NAME,
                 Gio.BusNameOwnerFlags.NONE,
                 connection => {
+                    // bus-acquired fires asynchronously; disable() may have run first.
+                    if (!this._enabled)
+                        return;
                     this._dbusConn = connection;
                     this._dbusControl = Gio.DBusExportedObject.wrapJSObject(DBUS_CONTROL_IFACE, this._dbusApi);
                     this._dbusControl.export(connection, DBUS_CONTROL_PATH);
@@ -211,6 +230,18 @@ class OpenWisprController {
     }
 
     disable() {
+        // Mark disabled FIRST. _stopRecording sees this and skips dispatching a
+        // new async Stop on a torn-down controller, and in-flight async callbacks
+        // (Start/Stop/g-signal) bail out via `if (!this._enabled) return;`.
+        this._enabled = false;
+
+        // Cancel any in-flight companion D-Bus calls so their callbacks either
+        // get a cancelled error or no-op via the _enabled guard.
+        this._startCancellable?.cancel();
+        this._stopCancellable?.cancel();
+        this._startCancellable = null;
+        this._stopCancellable = null;
+
         this._stopRecording(false); // Force stop without transcription if disabling
         this._clearClipboardRestoreSources();
 
@@ -270,6 +301,11 @@ class OpenWisprController {
 
         this._dbusConn = null;
         this._companionProxy = null;
+
+        if (this._virtualKeyboard) {
+            this._virtualKeyboard.run_dispose();
+            this._virtualKeyboard = null;
+        }
 
         Main.wm.removeKeybinding('toggle-recording');
         this._settings = null;
@@ -555,39 +591,81 @@ class OpenWisprController {
             return false;
         }
 
-        try {
-            const result = proxy.call_sync(
-                'Start',
-                null,
-                Gio.DBusCallFlags.NONE,
-                15000,
-                null
-            );
-            const [started] = result.deep_unpack();
-            if (!started)
-                return false;
-        } catch (e) {
-            console.error(`[openwispr-gnome-extension] Companion start failed: ${e}`);
-            this._notifyError('Failed to start recording via companion service.');
-            this._companionProxy = null;
-            return false;
-        }
-
-        this._debug(`Starting recording (${trigger})...`);
-        this._recording = true;
+        // Start is async: call_sync would block the GNOME Shell main thread up to
+        // the call timeout. We mark a pending state so callers (D-Bus Status, re-entry
+        // guards) see activity, and finalize recording state in the callback.
+        this._processing = true;
         this._recordingTrigger = trigger;
-        this._setPanelIconState('recording');
+        this._setPanelIconState('processing');
+        this._debug(`Starting recording (${trigger})...`);
 
-        return true;
+        // Fresh cancellable for this in-flight call; disable() cancels it.
+        this._startCancellable?.cancel();
+        this._startCancellable = new Gio.Cancellable();
+        const cancellable = this._startCancellable;
+        const triggerSource = trigger;
+
+        proxy.call(
+            'Start',
+            null,
+            Gio.DBusCallFlags.NONE,
+            COMPANION_START_TIMEOUT_MS,
+            cancellable,
+            (dbusProxy, res) => {
+                // disable() may have torn everything down while the call was in flight.
+                if (!this._enabled)
+                    return;
+
+                let started = false;
+                try {
+                    const result = dbusProxy.call_finish(res);
+                    // Reply is (b); unpack defensively rather than assuming exact shape.
+                    const reply = result.deep_unpack();
+                    started = reply[0] === true;
+                } catch (e) {
+                    console.error(`[openwispr-gnome-extension] Companion start failed: ${e}`);
+                    this._notifyError('Failed to start recording via companion service.');
+                    this._companionProxy = null;
+                    this._resetState();
+                    return;
+                }
+
+                if (!started) {
+                    this._debug(`Companion declined to start (${triggerSource}).`);
+                    this._resetState();
+                    return;
+                }
+
+                this._processing = false;
+                this._recording = true;
+                this._setPanelIconState('recording');
+            }
+        );
+
+        // Synchronous return reflects pending, not yet recording — callers that
+        // need a confirmed state should consult Status() / changed::recording.
+        return false;
     }
 
     _stopRecording(transcribe = true) {
-        if (!this._recording)
+        // disable() sets _enabled=false first; never dispatch a new async Stop on a
+        // torn-down controller — just reset synchronously so state is consistent.
+        if (!this._enabled) {
+            this._resetState();
             return;
+        }
+
+        if (!this._recording) {
+            // A Start or a transcribe=true Stop may already be in flight
+            // (_processing=true). Surface the drop so the user sees it wasn't ignored.
+            if (this._processing)
+                this._notify('Still processing previous transcription…');
+            return;
+        }
 
         this._debug(`Stopping recording (${this._recordingTrigger ?? 'unknown'})...`);
         if (this._recordingTrigger === 'hold')
-            this._holdStartCooldownUntilUs = GLib.get_monotonic_time() + 750000;
+            this._holdStartCooldownUntilUs = GLib.get_monotonic_time() + HOLD_COOLDOWN_US;
 
         this._recording = false;
         this._processing = true;
@@ -607,13 +685,22 @@ class OpenWisprController {
         // The callback only registers the pending token; delivery happens in
         // _onCompanionSignal. When transcribe is false, no signal is emitted
         // and the caller resets state from the reply directly.
+        // Fresh cancellable for this in-flight Stop; disable() cancels it so the
+        // callback can no-op via the _enabled guard instead of touching freed state.
+        this._stopCancellable?.cancel();
+        this._stopCancellable = new Gio.Cancellable();
+        const cancellable = this._stopCancellable;
         proxy.call(
             'Stop',
             params,
             Gio.DBusCallFlags.NONE,
-            300000,
-            null,
+            COMPANION_STOP_TIMEOUT_MS,
+            cancellable,
             (dbusProxy, res) => {
+                // disable() may have torn everything down while the call was in flight.
+                if (!this._enabled)
+                    return;
+
                 try {
                     const result = dbusProxy.call_finish(res);
                     const [token] = result.deep_unpack();
@@ -817,20 +904,27 @@ class OpenWisprController {
             }
 
             const seat = Clutter.get_default_backend().get_default_seat();
-            const virtualDevice = seat.create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
-            const now = () => GLib.get_monotonic_time() / 1000;
-            
-            let time = now();
-            
-            // Simulate Ctrl+V
+            // Reuse a single virtual keyboard across injections; creating one per
+            // paste leaks a Clutter device. run_dispose() in disable() releases it.
+            if (!this._virtualKeyboard) {
+                this._virtualKeyboard = seat.create_virtual_device(
+                    Clutter.InputDeviceType.KEYBOARD_DEVICE
+                );
+            }
+            const virtualDevice = this._virtualKeyboard;
+
+            // Use the Shell event clock for each keyval event. notify_keyval expects
+            // an event time in ms; monotonic time with 1ms increments risks collisions
+            // and out-of-order events under load.
+            const pressTime = global.get_current_time();
             // Ctrl Press
-            virtualDevice.notify_keyval(time++, Clutter.KEY_Control_L, Clutter.KeyState.PRESSED);
+            virtualDevice.notify_keyval(pressTime, Clutter.KEY_Control_L, Clutter.KeyState.PRESSED);
             // V Press
-            virtualDevice.notify_keyval(time++, Clutter.KEY_v, Clutter.KeyState.PRESSED);
+            virtualDevice.notify_keyval(pressTime + 1, Clutter.KEY_v, Clutter.KeyState.PRESSED);
             // V Release
-            virtualDevice.notify_keyval(time++, Clutter.KEY_v, Clutter.KeyState.RELEASED);
+            virtualDevice.notify_keyval(pressTime + 2, Clutter.KEY_v, Clutter.KeyState.RELEASED);
             // Ctrl Release
-            virtualDevice.notify_keyval(time++, Clutter.KEY_Control_L, Clutter.KeyState.RELEASED);
+            virtualDevice.notify_keyval(pressTime + 3, Clutter.KEY_Control_L, Clutter.KeyState.RELEASED);
             
             this._debug('Text injected via clipboard paste');
             
@@ -885,11 +979,31 @@ class OpenWisprController {
         Main.notify('openwispr-gnome-extension Error', message);
     }
 
-    _resetState() {
+    _initState() {
+        // Booleans/trigger state only — no UI. Called from enable() BEFORE the
+        // indicator/_icon is created, so _resetState (which touches _icon) cannot
+        // be used here.
         this._recording = false;
         this._processing = false;
         this._recordingTrigger = null;
         this._remoteHoldBinding = null;
+        this._holdKeyPressed = false;
+        this._holdStartCooldownUntilUs = 0;
+        this._startCancellable = null;
+        this._stopCancellable = null;
+        this._virtualKeyboard = null;
+    }
+
+    _resetState() {
+        // Post-recording reset. May touch the panel icon, so only call after the
+        // indicator/_icon exists (i.e. from enable()'s later init or from callbacks).
+        this._recording = false;
+        this._processing = false;
+        this._recordingTrigger = null;
+        this._remoteHoldBinding = null;
+        // A held key may still be physically down when a stop fires; clear it so
+        // the next captured-event pass doesn't treat a stale press as a new start.
+        this._holdKeyPressed = false;
         this._setPanelIconState('idle');
     }
 
