@@ -66,6 +66,7 @@ const (
 	// recorderExitInterrupted is the conventional shell encoding
 	// (128 + SIGINT) ffmpeg may emit when interrupted.
 	recorderExitInterrupted = 130
+	gsettingsSchema      = "org.gnome.shell.extensions.openwispr"
 )
 
 // silenceThresholdRegexp validates the user-supplied silence threshold
@@ -116,7 +117,9 @@ type recorderEngine struct {
 	outputFile string
 	// ctx is cancelled on service shutdown so in-flight pipeline
 	// HTTP/subprocess calls abort promptly.
-	ctx context.Context
+	ctx    context.Context
+	conn   *dbus.Conn
+	cancels map[string]context.CancelFunc
 }
 
 func runEngine(conn *dbus.Conn) error {
@@ -137,7 +140,7 @@ func runEngine(conn *dbus.Conn) error {
 	engineCtx, cancelEngine := context.WithCancel(ctx)
 	defer cancelEngine()
 
-	engine := &recorderEngine{ctx: engineCtx}
+	engine := &recorderEngine{ctx: engineCtx, conn: conn, cancels: map[string]context.CancelFunc{}}
 	if err := conn.Export(engine, companionPath, companionInterface); err != nil {
 		return err
 	}
@@ -169,7 +172,77 @@ func runEngine(conn *dbus.Conn) error {
 	return shutdownErr
 }
 
-func (e *recorderEngine) Start() (bool, *dbus.Error) {
+// authorize verifies that the D-Bus method caller is the GNOME Shell process.
+// Only Shell is permitted to drive the recorder; any other session process is
+// rejected. The GNOME Shell well-known name (org.gnome.Shell) is resolved to a
+// PID via the bus daemon and compared against the caller's PID.
+func (e *recorderEngine) authorize(msg *dbus.Message) error {
+	if e.conn == nil {
+		return errors.New("openwispr: dbus connection not initialized")
+	}
+	sender, ok := msg.Headers[dbus.FieldSender].Value().(string)
+	if !ok || sender == "" {
+		return errors.New("openwispr: caller has no sender")
+	}
+	bus := e.conn.Object("org.freedesktop.DBus", "/org/freedesktop/DBus")
+	var callerPID, shellPID uint32
+	if err := bus.Call("org.freedesktop.DBus.GetConnectionUnixProcessID", 0, sender).Store(&callerPID); err != nil {
+		return fmt.Errorf("openwispr: lookup caller pid: %w", err)
+	}
+	if err := bus.Call("org.freedesktop.DBus.GetConnectionUnixProcessID", 0, "org.gnome.Shell").Store(&shellPID); err != nil {
+		return fmt.Errorf("openwispr: lookup gnome shell pid: %w", err)
+	}
+	if callerPID != shellPID {
+		return fmt.Errorf("openwispr: caller pid %d is not gnome shell pid %d", callerPID, shellPID)
+	}
+	return nil
+}
+
+// emitCompletion emits the TranscriptionComplete D-Bus signal for the given
+// token. errStr is empty on success. Emit failures are logged, not returned,
+// because the pipeline has already completed by the time we signal.
+func (e *recorderEngine) emitCompletion(token, transcript, errStr string) {
+	if e.conn == nil {
+		return
+	}
+	if err := e.conn.Emit(companionPath, companionInterface+".TranscriptionComplete", token, transcript, errStr); err != nil {
+		log.Printf("openwispr: emit TranscriptionComplete failed: %v", err)
+	}
+}
+
+// removeCancel drops the per-token cancel func from the engine map. Safe to
+// call for unknown or already-removed tokens.
+func (e *recorderEngine) removeCancel(token string) {
+	e.mu.Lock()
+	delete(e.cancels, token)
+	e.mu.Unlock()
+}
+
+// readSecret reads an API key from the extension's GSettings schema. Secrets
+// are never transported over the session D-Bus bus; the engine reads them
+// directly from dconf via gsettings, which is always present on GNOME.
+func readSecret(key string) (string, error) {
+	out, err := exec.Command("gsettings", "get", gsettingsSchema, key).Output()
+	if err != nil {
+		return "", fmt.Errorf("read gsettings key %s: %w", key, err)
+	}
+	raw := strings.TrimSpace(string(out))
+	// gsettings wraps string values in single quotes and escapes embedded
+	// single quotes as ''. Strip the wrapping quotes and unescape.
+	if len(raw) >= 2 && raw[0] == '\'' && raw[len(raw)-1] == '\'' {
+		raw = raw[1 : len(raw)-1]
+		raw = strings.ReplaceAll(raw, "''", "'")
+	}
+	return raw, nil
+}
+
+// Start is the D-Bus method that begins audio capture via ffmpeg. It returns
+// true if recording started, false if a recording or transcription was already
+// in progress. Returns a *dbus.Error if ffmpeg is missing or fails to start.
+func (e *recorderEngine) Start(msg *dbus.Message) (bool, *dbus.Error) {
+	if err := e.authorize(msg); err != nil {
+		return false, dbus.MakeFailedError(err)
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -216,11 +289,20 @@ func (e *recorderEngine) Start() (bool, *dbus.Error) {
 	return true, nil
 }
 
-func (e *recorderEngine) Stop(transcribe bool, configJSON string) (bool, string, *dbus.Error) {
+// Stop is the async D-Bus method that stops the recorder and optionally starts
+// transcription. It stops ffmpeg synchronously, then returns a token immediately.
+// When transcribe is true, the pipeline runs in a goroutine and the
+// TranscriptionComplete(token, transcript, err) signal is emitted on
+// completion. When transcribe is false, no signal is emitted; the caller
+// resets state from the reply. Returns an empty token if nothing was recording.
+func (e *recorderEngine) Stop(msg *dbus.Message, transcribe bool, configJSON string) (string, *dbus.Error) {
+	if err := e.authorize(msg); err != nil {
+		return "", dbus.MakeFailedError(err)
+	}
 	e.mu.Lock()
 	if !e.recording || e.recordCmd == nil {
 		e.mu.Unlock()
-		return false, "", nil
+		return "", nil
 	}
 
 	cmd := e.recordCmd
@@ -234,6 +316,14 @@ func (e *recorderEngine) Stop(transcribe bool, configJSON string) (bool, string,
 	// Best-effort cleanup of the recording temp file on every return path.
 	defer os.Remove(inputPath)
 
+	token := fmt.Sprintf("%d", time.Now().UnixNano())
+	// Derive the per-token ctx from the engine ctx so Cancel() aborts the
+	// pipeline AND service shutdown cancels it too.
+	ctx, cancel := context.WithCancel(e.ctx)
+	e.mu.Lock()
+	e.cancels[token] = cancel
+	e.mu.Unlock()
+
 	if cmd.Process != nil {
 		// ffmpeg may already be exiting; the signal error is intentionally
 		// ignored as the process can be dead already.
@@ -243,30 +333,64 @@ func (e *recorderEngine) Stop(transcribe bool, configJSON string) (bool, string,
 	if err := waitCommand(cmd, recorderStopTimeout); err != nil {
 		if !isGracefulRecorderExit(err, inputPath) {
 			e.finishProcessing()
-			return false, "", dbus.MakeFailedError(fmt.Errorf("stop recorder: %w", err))
+			e.removeCancel(token)
+			return "", dbus.MakeFailedError(fmt.Errorf("stop recorder: %w", err))
 		}
 	}
 
 	if !transcribe {
 		e.finishProcessing()
-		return true, "", nil
+		e.removeCancel(token)
+		// No transcription requested — no signal. The caller resets state
+		// from the reply (token is non-empty, confirming the recorder stopped).
+		return token, nil
 	}
 
 	cfg, err := parsePipelineConfig(configJSON)
 	if err != nil {
 		e.finishProcessing()
-		return false, "", dbus.MakeFailedError(err)
+		e.removeCancel(token)
+		return "", dbus.MakeFailedError(err)
 	}
 
-	transcript, err := runPipeline(e.ctx, inputPath, cfg)
-	e.finishProcessing()
-	if err != nil {
-		return false, "", dbus.MakeFailedError(err)
-	}
+	go func() {
+		transcript, runErr := runPipeline(ctx, inputPath, cfg)
+		e.finishProcessing()
+		e.removeCancel(token)
+		errStr := ""
+		if runErr != nil {
+			errStr = runErr.Error()
+			log.Printf("openwispr pipeline failed for token %s: %v", token, runErr)
+		}
+		e.emitCompletion(token, transcript, errStr)
+	}()
 
-	return true, transcript, nil
+	return token, nil
 }
 
+// Cancel is the D-Bus method that cancels an in-flight transcription pipeline
+// identified by its token. It is a no-op if the token is unknown or the
+// pipeline has already completed. Full cancellation requires context
+// propagation into the pipeline (added separately); the method surface and
+// per-token cancel map are stable here.
+func (e *recorderEngine) Cancel(msg *dbus.Message, token string) *dbus.Error {
+	if err := e.authorize(msg); err != nil {
+		return dbus.MakeFailedError(err)
+	}
+	e.mu.Lock()
+	cancel, ok := e.cancels[token]
+	if ok {
+		delete(e.cancels, token)
+	}
+	e.mu.Unlock()
+	if ok {
+		cancel()
+	}
+	return nil
+}
+
+// Status is the D-Bus method that reports the engine's current recording and
+// processing state. Returns (recording, processing) booleans.
 func (e *recorderEngine) Status() (bool, bool, *dbus.Error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -406,15 +530,23 @@ func trimSilence(ctx context.Context, inputPath string, cfg pipelineConfig) (str
 func transcribe(ctx context.Context, inputPath string, cfg pipelineConfig) (string, error) {
 	switch cfg.STTProvider {
 	case "openai":
-		if cfg.STTOpenAIApiKey == "" {
+		apiKey, err := readSecret("stt-openai-api-key")
+		if err != nil {
+			return "", fmt.Errorf("stt openai key: %w", err)
+		}
+		if apiKey == "" {
 			return "", errors.New("missing OpenAI STT API key")
 		}
-		return transcribeRemote(ctx, inputPath, cfg.STTOpenAIEndpoint, cfg.STTOpenAIModel, cfg.STTOpenAIApiKey)
+		return transcribeRemote(ctx, inputPath, cfg.STTOpenAIEndpoint, cfg.STTOpenAIModel, apiKey)
 	case "groq":
-		if cfg.STTGroqApiKey == "" {
+		apiKey, err := readSecret("stt-groq-api-key")
+		if err != nil {
+			return "", fmt.Errorf("stt groq key: %w", err)
+		}
+		if apiKey == "" {
 			return "", errors.New("missing Groq STT API key")
 		}
-		return transcribeRemote(ctx, inputPath, cfg.STTGroqEndpoint, cfg.STTGroqModel, cfg.STTGroqApiKey)
+		return transcribeRemote(ctx, inputPath, cfg.STTGroqEndpoint, cfg.STTGroqModel, apiKey)
 	default:
 		return transcribeLocal(ctx, inputPath, cfg.ModelPath)
 	}
@@ -527,11 +659,19 @@ func cleanupTranscript(ctx context.Context, text string, cfg pipelineConfig) (st
 	case "groq":
 		endpoint = cfg.LLMGroqEndpoint
 		model = cfg.LLMGroqModel
-		apiKey = cfg.LLMGroqApiKey
+		key, err := readSecret("llm-groq-api-key")
+		if err != nil {
+			return text, fmt.Errorf("llm groq key: %w", err)
+		}
+		apiKey = key
 	default:
 		endpoint = cfg.LLMOpenAIEndpoint
 		model = cfg.LLMOpenAIModel
-		apiKey = cfg.LLMOpenAIApiKey
+		key, err := readSecret("llm-openai-api-key")
+		if err != nil {
+			return text, fmt.Errorf("llm openai key: %w", err)
+		}
+		apiKey = key
 	}
 
 	if strings.TrimSpace(apiKey) == "" {
