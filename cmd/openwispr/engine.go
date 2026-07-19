@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -25,7 +26,62 @@ import (
 const (
 	defaultWhisperBinary = "/usr/bin/whisper-cli"
 	defaultFFmpegBinary  = "/usr/bin/ffmpeg"
+
+	// recorderStopTimeout bounds the wait for ffmpeg to flush the WAV file
+	// after SIGINT when Stop is called.
+	recorderStopTimeout = 15 * time.Second
+
+	// recorderShutdownTimeout bounds how long runEngine waits for the ffmpeg
+	// recorder to exit after SIGTERM during service shutdown.
+	recorderShutdownTimeout = 15 * time.Second
+
+	// sttHTTPTimeout bounds a single remote speech-to-text HTTP request.
+	sttHTTPTimeout = 120 * time.Second
+	// llmHTTPTimeout bounds a single LLM cleanup HTTP request.
+	llmHTTPTimeout = 120 * time.Second
+
+	// minSilenceDuration is the smallest silence duration we accept before
+	// falling back to the default; values below this are treated as unset.
+	minSilenceDuration = 0.05
+	// defaultSilenceDuration is the silence window used when the config
+	// value is missing or implausibly small.
+	defaultSilenceDuration = 0.25
+	// defaultSilenceThreshold is the dB threshold used when the config
+	// value is missing.
+	defaultSilenceThreshold = "-35dB"
+
+	// hallucinationOverlapHigh: cleaned transcripts with token overlap at or
+	// above this fraction of the original are accepted as legitimate cleanup.
+	hallucinationOverlapHigh = 0.45
+	// hallucinationOverlapLow: overlap below this fraction (with no assistant
+	// phrasing) is treated as a hallucinated rewrite.
+	hallucinationOverlapLow = 0.30
+	// hallucinationMinTokens: original transcripts shorter than this many
+	// tokens skip the overlap heuristic (too little signal to judge).
+	hallucinationMinTokens = 6
+
+	// recorderExitKilled is ffmpeg's exit code (as surfaced by os/exec on
+	// this platform) when terminated by a signal during Stop.
+	recorderExitKilled = 255
+	// recorderExitInterrupted is the conventional shell encoding
+	// (128 + SIGINT) ffmpeg may emit when interrupted.
+	recorderExitInterrupted = 130
 )
+
+// silenceThresholdRegexp validates the user-supplied silence threshold
+// before it is interpolated into an ffmpeg filtergraph, preventing filter
+// injection via crafted config values.
+var silenceThresholdRegexp = regexp.MustCompile(`^-?\d+(\.\d+)?dB$`)
+
+// httpClient is shared across STT and LLM HTTP calls to avoid per-call
+// connection-pool churn. Per-call deadlines are bounded via context.
+var httpClient = &http.Client{
+	Transport: &http.Transport{
+		MaxIdleConns:        10,
+		MaxIdleConnsPerHost: 5,
+		IdleConnTimeout:     90 * time.Second,
+	},
+}
 
 type pipelineConfig struct {
 	ModelPath          string  `json:"modelPath"`
@@ -58,6 +114,9 @@ type recorderEngine struct {
 	processing bool
 	recordCmd  *exec.Cmd
 	outputFile string
+	// ctx is cancelled on service shutdown so in-flight pipeline
+	// HTTP/subprocess calls abort promptly.
+	ctx context.Context
 }
 
 func runEngine(conn *dbus.Conn) error {
@@ -69,22 +128,45 @@ func runEngine(conn *dbus.Conn) error {
 		return fmt.Errorf("could not acquire companion bus name %s (reply=%d)", companionBusName, ownerReply)
 	}
 
-	engine := &recorderEngine{}
+	ctx, cancelSignal := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancelSignal()
+
+	// engineCtx is derived from the signal context so it is cancelled on
+	// SIGINT/SIGTERM, and can also be cancelled independently when the
+	// session bus connection drops.
+	engineCtx, cancelEngine := context.WithCancel(ctx)
+	defer cancelEngine()
+
+	engine := &recorderEngine{ctx: engineCtx}
 	if err := conn.Export(engine, companionPath, companionInterface); err != nil {
 		return err
 	}
 
 	log.Printf("openwispr engine service ready: %s %s", companionBusName, companionPath)
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
-
+	var shutdownErr error
 	select {
 	case <-ctx.Done():
-		return nil
 	case <-conn.Context().Done():
-		return errors.New("session bus connection closed")
+		shutdownErr = errors.New("session bus connection closed")
 	}
+	cancelEngine()
+
+	// Kill any active recorder so ffmpeg flushes/exits before we return,
+	// rather than leaving a recording process orphaned by shutdown.
+	engine.mu.Lock()
+	cmd := engine.recordCmd
+	engine.recordCmd = nil
+	engine.recording = false
+	engine.mu.Unlock()
+	if cmd != nil && cmd.Process != nil {
+		// Process may already be exiting; the signal error is intentionally
+		// ignored as the process can be dead already.
+		_ = cmd.Process.Signal(syscall.SIGTERM)
+		_ = waitCommand(cmd, recorderShutdownTimeout)
+	}
+
+	return shutdownErr
 }
 
 func (e *recorderEngine) Start() (bool, *dbus.Error) {
@@ -100,7 +182,11 @@ func (e *recorderEngine) Start() (bool, *dbus.Error) {
 		return false, dbus.MakeFailedError(fmt.Errorf("ffmpeg not found"))
 	}
 
-	outputFile := filepath.Join(os.TempDir(), "openwispr_recording.wav")
+	outputFile, err := createTempFile("openwispr_recording_*.wav")
+	if err != nil {
+		return false, dbus.MakeFailedError(fmt.Errorf("create recorder temp file: %w", err))
+	}
+
 	cmd := exec.Command(
 		ffmpegPath,
 		"-y",
@@ -119,6 +205,7 @@ func (e *recorderEngine) Start() (bool, *dbus.Error) {
 	)
 
 	if err := cmd.Start(); err != nil {
+		_ = os.Remove(outputFile)
 		return false, dbus.MakeFailedError(fmt.Errorf("start recorder: %w", err))
 	}
 
@@ -144,11 +231,16 @@ func (e *recorderEngine) Stop(transcribe bool, configJSON string) (bool, string,
 	e.processing = true
 	e.mu.Unlock()
 
+	// Best-effort cleanup of the recording temp file on every return path.
+	defer os.Remove(inputPath)
+
 	if cmd.Process != nil {
+		// ffmpeg may already be exiting; the signal error is intentionally
+		// ignored as the process can be dead already.
 		_ = cmd.Process.Signal(syscall.SIGINT)
 	}
 
-	if err := waitCommand(cmd, 15*time.Second); err != nil {
+	if err := waitCommand(cmd, recorderStopTimeout); err != nil {
 		if !isGracefulRecorderExit(err, inputPath) {
 			e.finishProcessing()
 			return false, "", dbus.MakeFailedError(fmt.Errorf("stop recorder: %w", err))
@@ -166,7 +258,7 @@ func (e *recorderEngine) Stop(transcribe bool, configJSON string) (bool, string,
 		return false, "", dbus.MakeFailedError(err)
 	}
 
-	transcript, err := runPipeline(inputPath, cfg)
+	transcript, err := runPipeline(e.ctx, inputPath, cfg)
 	e.finishProcessing()
 	if err != nil {
 		return false, "", dbus.MakeFailedError(err)
@@ -202,22 +294,26 @@ func parsePipelineConfig(raw string) (pipelineConfig, error) {
 	cfg.LLMProvider = normalizeProviderName(cfg.LLMProvider)
 
 	if cfg.SilenceThreshold == "" {
-		cfg.SilenceThreshold = "-35dB"
+		cfg.SilenceThreshold = defaultSilenceThreshold
 	}
-	if cfg.SilenceDuration < 0.05 {
-		cfg.SilenceDuration = 0.25
+	if cfg.SilenceDuration < minSilenceDuration {
+		cfg.SilenceDuration = defaultSilenceDuration
 	}
 
 	return cfg, nil
 }
 
-func runPipeline(inputPath string, cfg pipelineConfig) (string, error) {
-	processedPath, err := trimSilence(inputPath, cfg)
+func runPipeline(ctx context.Context, inputPath string, cfg pipelineConfig) (string, error) {
+	processedPath, err := trimSilence(ctx, inputPath, cfg)
 	if err != nil {
 		return "", err
 	}
+	if processedPath != inputPath {
+		// Trimmed file is a temp artifact; clean it up on return.
+		defer os.Remove(processedPath)
+	}
 
-	transcript, err := transcribe(processedPath, cfg)
+	transcript, err := transcribe(ctx, processedPath, cfg)
 	if err != nil {
 		return "", err
 	}
@@ -231,15 +327,18 @@ func runPipeline(inputPath string, cfg pipelineConfig) (string, error) {
 		return transcript, nil
 	}
 
-	cleaned, err := cleanupTranscript(transcript, cfg)
+	cleaned, err := cleanupTranscript(ctx, transcript, cfg)
 	if err != nil {
+		// LLM cleanup is best-effort: surface the failure but return the raw
+		// transcript so the user still gets output.
+		log.Printf("openwispr: llm cleanup failed, returning uncleaned transcript: %v", err)
 		return transcript, nil
 	}
 
 	return strings.TrimSpace(cleaned), nil
 }
 
-func trimSilence(inputPath string, cfg pipelineConfig) (string, error) {
+func trimSilence(ctx context.Context, inputPath string, cfg pipelineConfig) (string, error) {
 	if !cfg.SilenceTrimEnabled {
 		return inputPath, nil
 	}
@@ -249,7 +348,17 @@ func trimSilence(inputPath string, cfg pipelineConfig) (string, error) {
 		return inputPath, nil
 	}
 
-	trimmedPath := filepath.Join(os.TempDir(), "openwispr_recording_trimmed.wav")
+	// Validate the threshold before interpolating it into the filtergraph to
+	// prevent malformed or injected ffmpeg filter syntax.
+	if !silenceThresholdRegexp.MatchString(cfg.SilenceThreshold) {
+		return "", fmt.Errorf("invalid silence threshold %q: must match -N[dB] (e.g. -35dB)", cfg.SilenceThreshold)
+	}
+
+	trimmedPath, err := createTempFile("openwispr_trimmed_*.wav")
+	if err != nil {
+		return "", fmt.Errorf("create trim temp file: %w", err)
+	}
+
 	filter := fmt.Sprintf(
 		"silenceremove=start_periods=1:start_duration=%f:start_threshold=%s:stop_periods=-1:stop_duration=%f:stop_threshold=%s",
 		cfg.SilenceDuration,
@@ -258,8 +367,7 @@ func trimSilence(inputPath string, cfg pipelineConfig) (string, error) {
 		cfg.SilenceThreshold,
 	)
 
-	cmd := exec.Command(
-		ffmpegPath,
+	cmd := exec.CommandContext(ctx, ffmpegPath,
 		"-y",
 		"-hide_banner",
 		"-loglevel",
@@ -270,40 +378,49 @@ func trimSilence(inputPath string, cfg pipelineConfig) (string, error) {
 		filter,
 		trimmedPath,
 	)
+	stderr := bytes.NewBuffer(nil)
+	cmd.Stderr = stderr
 
 	if err := cmd.Run(); err != nil {
+		// Trim failure is non-fatal: log and fall back to the untrimmed input
+		// so transcription still proceeds. This covers both shutdown
+		// cancellation and genuine ffmpeg errors.
+		log.Printf("openwispr: ffmpeg silence trim failed, using untrimmed input: %v: %s", err, strings.TrimSpace(stderr.String()))
+		_ = os.Remove(trimmedPath)
 		return inputPath, nil
 	}
 
 	if !fileExists(trimmedPath) {
+		_ = os.Remove(trimmedPath)
 		return inputPath, nil
 	}
 
 	if info, err := os.Stat(trimmedPath); err != nil || info.Size() == 0 {
+		_ = os.Remove(trimmedPath)
 		return inputPath, nil
 	}
 
 	return trimmedPath, nil
 }
 
-func transcribe(inputPath string, cfg pipelineConfig) (string, error) {
+func transcribe(ctx context.Context, inputPath string, cfg pipelineConfig) (string, error) {
 	switch cfg.STTProvider {
 	case "openai":
 		if cfg.STTOpenAIApiKey == "" {
 			return "", errors.New("missing OpenAI STT API key")
 		}
-		return transcribeRemote(inputPath, cfg.STTOpenAIEndpoint, cfg.STTOpenAIModel, cfg.STTOpenAIApiKey)
+		return transcribeRemote(ctx, inputPath, cfg.STTOpenAIEndpoint, cfg.STTOpenAIModel, cfg.STTOpenAIApiKey)
 	case "groq":
 		if cfg.STTGroqApiKey == "" {
 			return "", errors.New("missing Groq STT API key")
 		}
-		return transcribeRemote(inputPath, cfg.STTGroqEndpoint, cfg.STTGroqModel, cfg.STTGroqApiKey)
+		return transcribeRemote(ctx, inputPath, cfg.STTGroqEndpoint, cfg.STTGroqModel, cfg.STTGroqApiKey)
 	default:
-		return transcribeLocal(inputPath, cfg.ModelPath)
+		return transcribeLocal(ctx, inputPath, cfg.ModelPath)
 	}
 }
 
-func transcribeLocal(inputPath, modelPath string) (string, error) {
+func transcribeLocal(ctx context.Context, inputPath, modelPath string) (string, error) {
 	whisperPath := resolveBinary("whisper-cli", defaultWhisperBinary)
 	if !fileExists(whisperPath) {
 		return "", errors.New("whisper-cli not found")
@@ -320,12 +437,15 @@ func transcribeLocal(inputPath, modelPath string) (string, error) {
 		"-nt",
 	)
 
-	cmd := exec.Command(whisperPath, args...)
+	cmd := exec.CommandContext(ctx, whisperPath, args...)
 	stderr := bytes.NewBuffer(nil)
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("local transcription failed: %w (%s)", err, strings.TrimSpace(stderr.String()))
 	}
+
+	// whisper-cli writes a <input>.txt sidecar; remove it on return.
+	defer os.Remove(inputPath + ".txt")
 
 	textBytes, err := os.ReadFile(inputPath + ".txt")
 	if err != nil {
@@ -335,66 +455,71 @@ func transcribeLocal(inputPath, modelPath string) (string, error) {
 	return strings.TrimSpace(string(textBytes)), nil
 }
 
-func transcribeRemote(inputPath, endpoint, model, apiKey string) (string, error) {
+func transcribeRemote(ctx context.Context, inputPath, endpoint, model, apiKey string) (string, error) {
 	if strings.TrimSpace(endpoint) == "" {
-		return "", errors.New("missing STT endpoint")
+		return "", errors.New("stt remote: missing endpoint")
 	}
 	if strings.TrimSpace(model) == "" {
-		return "", errors.New("missing STT model")
+		return "", errors.New("stt remote: missing model")
 	}
 
 	file, err := os.Open(inputPath)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("stt remote open input: %w", err)
 	}
 	defer file.Close()
 
 	body := bytes.NewBuffer(nil)
 	writer := multipart.NewWriter(body)
-	_ = writer.WriteField("model", model)
+	if err := writer.WriteField("model", model); err != nil {
+		return "", fmt.Errorf("stt remote write model field: %w", err)
+	}
 
 	part, err := writer.CreateFormFile("file", filepath.Base(inputPath))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("stt remote create form file: %w", err)
 	}
 	if _, err := io.Copy(part, file); err != nil {
-		return "", err
+		return "", fmt.Errorf("stt remote copy audio: %w", err)
 	}
 	if err := writer.Close(); err != nil {
-		return "", err
+		return "", fmt.Errorf("stt remote close multipart: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, endpoint, body)
+	reqCtx, cancel := context.WithTimeout(ctx, sttHTTPTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, body)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("stt remote build request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
-	resp, err := (&http.Client{Timeout: 120 * time.Second}).Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("stt remote http: %w", err)
 	}
 	defer resp.Body.Close()
 
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("stt remote read response: %w", err)
 	}
 
 	if resp.StatusCode >= 300 {
-		return "", fmt.Errorf("remote STT failed with HTTP %d", resp.StatusCode)
+		log.Printf("openwispr: stt remote returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(responseBody)))
+		return "", fmt.Errorf("stt remote failed with HTTP %d", resp.StatusCode)
 	}
 
 	transcript := parseTranscriptionJSON(responseBody)
 	if transcript == "" {
-		return "", errors.New("remote STT returned no transcript")
+		return "", errors.New("stt remote returned no transcript")
 	}
 
 	return transcript, nil
 }
 
-func cleanupTranscript(text string, cfg pipelineConfig) (string, error) {
+func cleanupTranscript(ctx context.Context, text string, cfg pipelineConfig) (string, error) {
 	provider := cfg.LLMProvider
 
 	var endpoint, model, apiKey string
@@ -424,28 +549,31 @@ func cleanupTranscript(text string, cfg pipelineConfig) (string, error) {
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return text, err
+		return text, fmt.Errorf("llm cleanup marshal payload: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
+	reqCtx, cancel := context.WithTimeout(ctx, llmHTTPTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return text, err
+		return text, fmt.Errorf("llm cleanup build request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := (&http.Client{Timeout: 120 * time.Second}).Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
-		return text, err
+		return text, fmt.Errorf("llm cleanup http: %w", err)
 	}
 	defer resp.Body.Close()
 
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return text, err
+		return text, fmt.Errorf("llm cleanup read response: %w", err)
 	}
 
 	if resp.StatusCode >= 300 {
+		log.Printf("openwispr: llm cleanup returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(responseBody)))
 		return text, fmt.Errorf("llm cleanup failed with HTTP %d", resp.StatusCode)
 	}
 
@@ -607,7 +735,7 @@ func looksLikeHallucinatedCleanup(original, cleaned string) bool {
 	originalTokens := tokenizeForOverlap(original)
 	cleanedTokens := tokenizeForOverlap(cleaned)
 
-	if len(originalTokens) < 6 || len(cleanedTokens) == 0 {
+	if len(originalTokens) < hallucinationMinTokens || len(cleanedTokens) == 0 {
 		return false
 	}
 
@@ -618,8 +746,8 @@ func looksLikeHallucinatedCleanup(original, cleaned string) bool {
 		}
 	}
 
-	overlap := float64(common) / float64(minInt(len(originalTokens), len(cleanedTokens)))
-	if overlap >= 0.45 {
+	overlap := float64(common) / float64(min(len(originalTokens), len(cleanedTokens)))
+	if overlap >= hallucinationOverlapHigh {
 		return false
 	}
 
@@ -631,7 +759,7 @@ func looksLikeHallucinatedCleanup(original, cleaned string) bool {
 		}
 	}
 
-	return overlap < 0.30
+	return overlap < hallucinationOverlapLow
 }
 
 func tokenizeForOverlap(s string) map[string]struct{} {
@@ -648,14 +776,6 @@ func tokenizeForOverlap(s string) map[string]struct{} {
 	return tokens
 }
 
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-
-	return b
-}
-
 func waitCommand(cmd *exec.Cmd, timeout time.Duration) error {
 	done := make(chan error, 1)
 	go func() {
@@ -667,6 +787,7 @@ func waitCommand(cmd *exec.Cmd, timeout time.Duration) error {
 		return err
 	case <-time.After(timeout):
 		if cmd.Process != nil {
+			// Process may already be dead or exiting; kill is best-effort.
 			_ = cmd.Process.Kill()
 		}
 		<-done
@@ -674,6 +795,13 @@ func waitCommand(cmd *exec.Cmd, timeout time.Duration) error {
 	}
 }
 
+// isGracefulRecorderExit reports whether err represents the recorder
+// (ffmpeg) exiting because it was interrupted via SIGINT during Stop,
+// rather than a genuine failure. ffmpeg reports this as exit code
+// recorderExitKilled (signal-terminated, as surfaced by os/exec on this
+// platform) or recorderExitInterrupted (128 + SIGINT, the conventional
+// shell encoding). The output file must also exist and be non-empty,
+// confirming the recording was flushed.
 func isGracefulRecorderExit(err error, outputPath string) bool {
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) {
@@ -681,7 +809,7 @@ func isGracefulRecorderExit(err error, outputPath string) bool {
 	}
 
 	code := exitErr.ExitCode()
-	if code != 255 && code != 130 {
+	if code != recorderExitKilled && code != recorderExitInterrupted {
 		return false
 	}
 
@@ -713,7 +841,29 @@ func fileExists(path string) bool {
 	return true
 }
 
+// createTempFile creates a uniquely-named temp file (mode 0600) for a
+// recording or trimmed artifact. It prefers XDG_RUNTIME_DIR (user-private,
+// 0700) and falls back to the shared temp dir. The returned path is the
+// file's name; the file is closed immediately so ffmpeg can overwrite it.
+func createTempFile(pattern string) (string, error) {
+	if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
+		if f, err := os.CreateTemp(dir, pattern); err == nil {
+			name := f.Name()
+			_ = f.Close()
+			return name, nil
+		}
+	}
+	f, err := os.CreateTemp("", pattern)
+	if err != nil {
+		return "", err
+	}
+	name := f.Name()
+	_ = f.Close()
+	return name, nil
+}
+
 func normalizeProviderName(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
 	if name == "grok" {
 		return "groq"
 	}
