@@ -5,6 +5,13 @@ import Gtk from 'gi://Gtk';
 
 import { ExtensionPreferences, gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
+// Dialog dimensions used across the preferences window.
+const DIALOG_DEFAULT_WIDTH = 780;
+const DIALOG_DEFAULT_HEIGHT = 480;
+const SHORTCUT_DIALOG_WIDTH = 360;
+const SHORTCUT_DIALOG_HEIGHT = 90;
+const MULTILINE_MIN_CONTENT_HEIGHT = 300;
+
 export default class OpenWisprPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings();
@@ -34,7 +41,7 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
             'curl -fsSL "$REPO/openwispr.png" -o ~/.local/share/icons/hicolor/256x256/apps/io.github.tnfssc.openwispr.png',
             'systemctl --user daemon-reload',
             'systemctl --user enable --now openwispr-engine.service',
-        ].join('; ');
+        ].join(' && ');
 
         this._addLinkRow(
             companionGroup,
@@ -134,7 +141,18 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
             title: _('Silence Threshold'),
             text: settings.get_string('silence-threshold'),
         });
-        silenceThresholdRow.connect('notify::text', () => settings.set_string('silence-threshold', silenceThresholdRow.text));
+        // Validate the ffmpeg threshold format before persisting. Use the
+        // `apply` signal (fires on Enter / focus-out) so we don't hammer dconf
+        // on every keystroke.
+        silenceThresholdRow.connect('apply', () => {
+            const value = silenceThresholdRow.text.trim();
+            if (!/^-?\d+(\.\d+)?dB$/.test(value)) {
+                silenceThresholdRow.add_css_class('error');
+                return;
+            }
+            silenceThresholdRow.remove_css_class('error');
+            settings.set_string('silence-threshold', value);
+        });
         audioGroup.add(silenceThresholdRow);
 
         const silenceDurationAdjustment = new Gtk.Adjustment({
@@ -144,6 +162,10 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
             page_increment: 0.1,
             value: settings.get_double('silence-duration'),
         });
+        // The adjustment clamps the stored value into [0.05, 5.0]; write the
+        // clamped value back so GSettings never holds a stale out-of-range number.
+        if (settings.get_double('silence-duration') !== silenceDurationAdjustment.value)
+            settings.set_double('silence-duration', silenceDurationAdjustment.value);
         const silenceDurationRow = new Adw.SpinRow({
             title: _('Silence Duration (seconds)'),
             adjustment: silenceDurationAdjustment,
@@ -168,6 +190,8 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         });
         const currentSttProvider = this._normalizeProvider(settings.get_string('stt-provider'));
         const sttIndex = sttProviderOptions.findIndex(option => option.id === currentSttProvider);
+        if (sttIndex < 0)
+            settings.set_string('stt-provider', sttProviderOptions[0].id);
         sttProviderRow.selected = sttIndex >= 0 ? sttIndex : 0;
         sttGroup.add(sttProviderRow);
 
@@ -220,6 +244,8 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         });
         const currentLlmProvider = this._normalizeProvider(settings.get_string('llm-provider'));
         const llmIndex = llmProviderOptions.findIndex(option => option.id === currentLlmProvider);
+        if (llmIndex < 0)
+            settings.set_string('llm-provider', llmProviderOptions[0].id);
         llmProviderRow.selected = llmIndex >= 0 ? llmIndex : 0;
         llmGroup.add(llmProviderRow);
 
@@ -264,7 +290,20 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
             title,
             text: settings.get_string(key),
         });
-        row.connect('notify::text', () => settings.set_string(key, row.text));
+        const isEndpoint = key.endsWith('-endpoint');
+        // Use the `apply` signal (libadwaita 1.2+, fires on Enter / focus-out)
+        // so we write to dconf once per committed edit instead of on every
+        // keystroke. Trim whitespace and, for endpoint keys, require an
+        // http(s) scheme so a malformed URL can't silently break the pipeline.
+        row.connect('apply', () => {
+            const value = row.text.trim();
+            if (isEndpoint && value && !/^https?:\/\//i.test(value)) {
+                row.add_css_class('error');
+                return;
+            }
+            row.remove_css_class('error');
+            settings.set_string(key, value);
+        });
         group.add(row);
         return row;
     }
@@ -278,7 +317,14 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
             valign: Gtk.Align.CENTER,
             width_chars: 24,
         });
-        entry.connect('notify::text', () => settings.set_string(key, entry.text));
+        // Gtk.PasswordEntry has no `apply` signal; commit on Enter and on
+        // focus-out instead of every keystroke. Trim whitespace so a stray
+        // newline or space can't silently invalidate the API key.
+        const commit = () => settings.set_string(key, entry.text.trim());
+        entry.connect('activate', commit);
+        const focusController = new Gtk.EventControllerFocus();
+        focusController.connect('leave', commit);
+        entry.add_controller(focusController);
 
         row.add_suffix(entry);
         row.activatable_widget = entry;
@@ -313,8 +359,8 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
             transient_for: window,
             modal: true,
             resizable: true,
-            default_width: 780,
-            default_height: 480,
+            default_width: DIALOG_DEFAULT_WIDTH,
+            default_height: DIALOG_DEFAULT_HEIGHT,
         });
 
         const content = new Gtk.Box({
@@ -329,7 +375,7 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         const scrolled = new Gtk.ScrolledWindow({
             hexpand: true,
             vexpand: true,
-            min_content_height: 300,
+            min_content_height: MULTILINE_MIN_CONTENT_HEIGHT,
         });
 
         const textView = new Gtk.TextView({
@@ -434,8 +480,8 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
             transient_for: window,
             modal: true,
             resizable: false,
-            default_width: 360,
-            default_height: 90,
+            default_width: SHORTCUT_DIALOG_WIDTH,
+            default_height: SHORTCUT_DIALOG_HEIGHT,
         });
 
         const content = new Gtk.Box({
@@ -521,13 +567,13 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         const modifiers = modifierTokens
             .map(token => {
                 if (token === 'control' || token === 'ctrl' || token === 'primary')
-                    return 'Ctrl';
+                    return _('Ctrl');
                 if (token === 'shift')
-                    return 'Shift';
+                    return _('Shift');
                 if (token === 'alt' || token === 'mod1')
-                    return 'Alt';
+                    return _('Alt');
                 if (token === 'super' || token === 'meta' || token === 'mod4')
-                    return 'Super';
+                    return _('Super');
                 return token;
             })
             .filter(Boolean);
@@ -540,7 +586,9 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
 
     _getDefaultShortcut(settings, key) {
         const defaultVariant = settings.get_default_value(key);
-        const defaultValue = defaultVariant?.deep_unpack?.() || [];
+        if (!defaultVariant)
+            throw new Error(`unknown gsettings key: ${key}`);
+        const defaultValue = defaultVariant.deep_unpack();
 
         if (!Array.isArray(defaultValue) || defaultValue.length === 0)
             return '';
@@ -583,18 +631,23 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
     }
 
     _copyToClipboard(text) {
-        try {
-            const display = Gdk.Display.get_default();
-            const clipboard = display?.get_clipboard();
-            clipboard?.set(text);
-        } catch (e) {
-            console.error(`[openwispr-gnome-extension] Failed to copy command: ${e}`);
+        const display = Gdk.Display.get_default();
+        if (!display) {
+            console.error('[openwispr] no display');
+            return;
         }
+        const clipboard = display.get_clipboard();
+        if (!clipboard) {
+            console.error('[openwispr] no clipboard');
+            return;
+        }
+        clipboard.set(text);
     }
 
     _openUri(url) {
         try {
-            Gio.AppInfo.launch_default_for_uri(url, null);
+            if (!Gio.AppInfo.launch_default_for_uri(url, null))
+                console.error(`[openwispr] no handler for ${url}`);
         } catch (e) {
             console.error(`[openwispr-gnome-extension] Failed to open URL: ${e}`);
         }
