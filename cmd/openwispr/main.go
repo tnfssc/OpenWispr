@@ -41,11 +41,38 @@ const (
 	shortcutID           = "openwispr-hold"
 	portalAppID          = "io.github.tnfssc.openwispr"
 	extensionUUID        = "openwispr-gnome-extension@tnfssc.github.com"
+
+	// setupCallTimeout bounds portal setup D-Bus calls (Register,
+	// CreateSession, BindShortcuts, Properties.Get). A wedged portal must
+	// not hang daemon boot indefinitely.
+	setupCallTimeout = 30 * time.Second
+
+	// restartSettleDelay lets systemd/userdb propagate service state
+	// before health checks run after a restart.
+	restartSettleDelay = 400 * time.Millisecond
+
+	// portalSignalBufferSize bounds the portal Activated/Deactivated
+	// signal queue. GNOME Shell may burst-emit activation pairs; 32
+	// absorbs a short burst without blocking the dispatch goroutine.
+	portalSignalBufferSize = 32
+
+	// requestSignalBufferSize bounds the portal Request.Response queue.
+	// One Response is expected per outstanding request; 4 covers setup
+	// plus late duplicate deliveries.
+	requestSignalBufferSize = 4
 )
 
 type extensionClient struct {
 	conn *dbus.Conn
 	objs []dbus.BusObject
+
+	// ctx bounds in-flight D-Bus calls so SIGINT/SIGTERM can interrupt
+	// them during shutdown. It is stored on the client rather than
+	// threaded through Start/Stop/Status because the evdev backend —
+	// maintained in a separate file outside this PR's scope — calls those
+	// methods without an explicit context. Set once at construction; the
+	// client lives only for the duration of run().
+	ctx context.Context
 }
 
 type status struct {
@@ -60,16 +87,31 @@ type shortcutBinding struct {
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		usage()
+	if err := run(os.Args); err != nil {
+		fmt.Fprintf(os.Stderr, "openwispr: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+// run dispatches the CLI subcommand. It owns the session bus connection
+// and returns any error so main() can print it without a date/time prefix
+// and let deferred cleanup (conn.Close) run on every exit path.
+func run(args []string) error {
+	if len(args) < 2 {
+		usage()
+		return errors.New("no subcommand specified")
 	}
 
 	conn, err := dbus.ConnectSessionBus()
 	if err != nil {
-		fatalf("failed to connect to session bus: %v", err)
+		return fmt.Errorf("failed to connect to session bus: %w", err)
 	}
 	defer conn.Close()
+
+	// A signal context covers every subcommand so SIGINT/SIGTERM can
+	// interrupt in-flight D-Bus calls and systemctl invocations.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	client := &extensionClient{
 		conn: conn,
@@ -77,65 +119,64 @@ func main() {
 			conn.Object(extensionBusName, extensionPath),
 			conn.Object(extensionShellBus, extensionPath),
 		},
+		ctx: ctx,
 	}
 
-	switch os.Args[1] {
+	switch args[1] {
 	case "toggle":
 		recording, err := client.Toggle("cli")
 		if err != nil {
-			fatalf("toggle failed: %v", err)
+			return fmt.Errorf("toggle failed: %w", err)
 		}
 		fmt.Printf("recording=%t\n", recording)
 	case "start":
 		started, err := client.Start("cli")
 		if err != nil {
-			fatalf("start failed: %v", err)
+			return fmt.Errorf("start failed: %w", err)
 		}
 		fmt.Printf("started=%t\n", started)
 	case "stop":
 		stopped, err := client.Stop(true, "cli")
 		if err != nil {
-			fatalf("stop failed: %v", err)
+			return fmt.Errorf("stop failed: %w", err)
 		}
 		fmt.Printf("stopped=%t\n", stopped)
 	case "status":
 		s, err := client.Status()
 		if err != nil {
-			fatalf("status failed: %v", err)
+			return fmt.Errorf("status failed: %w", err)
 		}
 		fmt.Printf("recording=%t processing=%t trigger=%q\n", s.Recording, s.Processing, s.Trigger)
 	case "doctor":
-		if err := runDoctor(conn, client); err != nil {
-			fatalf("doctor checks failed: %v", err)
+		if err := runDoctor(ctx, conn, client); err != nil {
+			return fmt.Errorf("doctor checks failed: %w", err)
 		}
 	case "restart":
-		if err := runRestart(os.Args[2:], conn, client); err != nil {
-			fatalf("restart failed: %v", err)
+		if err := runRestart(ctx, args[2:], conn, client); err != nil {
+			return fmt.Errorf("restart failed: %w", err)
 		}
 	case "daemon":
-		if err := runDaemon(os.Args[2:], conn, client); err != nil {
-			fatalf("daemon failed: %v", err)
+		if err := runDaemon(args[2:], ctx, conn, client); err != nil {
+			return fmt.Errorf("daemon failed: %w", err)
 		}
 	case "engine":
 		if err := runEngine(conn); err != nil {
-			fatalf("engine failed: %v", err)
+			return fmt.Errorf("engine failed: %w", err)
 		}
 	default:
 		usage()
-		os.Exit(1)
+		return fmt.Errorf("unknown subcommand %q", args[1])
 	}
+	return nil
 }
 
-func runDaemon(args []string, conn *dbus.Conn, client *extensionClient) error {
+func runDaemon(args []string, ctx context.Context, conn *dbus.Conn, client *extensionClient) error {
 	fs := flag.NewFlagSet("daemon", flag.ExitOnError)
 	backend := fs.String("backend", "auto", "daemon backend: auto|portal|evdev")
 	trigger := fs.String("trigger", defaultPortalTrigger, "portal preferred trigger (shortcuts spec format)")
 	device := fs.String("device", defaultEvdevDevice, "evdev keyboard device path")
 	key := fs.String("evdev-key", "z", "evdev key: z|capslock|rightalt|leftalt")
-	_ = fs.Parse(args)
-
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
+	fs.Parse(args)
 
 	log.Printf("starting openwispr daemon backend=%s", *backend)
 
@@ -149,11 +190,8 @@ func runDaemon(args []string, conn *dbus.Conn, client *extensionClient) error {
 		if portalErr == nil || ctx.Err() != nil {
 			return portalErr
 		}
-
-		if isPortalStartupUnavailable(portalErr) {
-			return fmt.Errorf("portal backend unavailable, retrying on service restart: %w", portalErr)
-		}
-
+		// Any portal failure — including startup-unavailable — falls
+		// back to evdev so the daemon can still serve the trigger key.
 		log.Printf("portal backend failed (%v), falling back to evdev", portalErr)
 		return runEvdevDaemon(ctx, client, *device, *key)
 	default:
@@ -161,7 +199,13 @@ func runDaemon(args []string, conn *dbus.Conn, client *extensionClient) error {
 	}
 }
 
-func isPortalStartupUnavailable(err error) bool {
+// isPortalUnavailable reports whether err is a D-Bus error indicating the
+// target service, interface, object, or method is not present on the bus.
+// It is used both to retry the next bus name in callStore and (formerly)
+// to decide evdev fallback when the portal is missing at startup. The two
+// previous helpers disagreed on UnknownInterface membership; this single
+// predicate reconciles them.
+func isPortalUnavailable(err error) bool {
 	var dbusErr dbus.Error
 	if !errors.As(err, &dbusErr) {
 		return false
@@ -180,17 +224,17 @@ func isPortalStartupUnavailable(err error) bool {
 }
 
 func runPortalDaemon(ctx context.Context, conn *dbus.Conn, client *extensionClient, preferredTrigger string) error {
-	if err := registerPortalAppID(conn); err != nil {
+	if err := registerPortalAppID(ctx, conn); err != nil {
 		return fmt.Errorf("prepare portal app id: %w", err)
 	}
 
-	sessionHandle, err := portalCreateSession(conn)
+	sessionHandle, err := portalCreateSession(ctx, conn)
 	if err != nil {
 		return fmt.Errorf("create portal session: %w", err)
 	}
 	defer closePortalSession(conn, sessionHandle)
 
-	if err := portalBindShortcut(conn, sessionHandle, preferredTrigger); err != nil {
+	if err := portalBindShortcut(ctx, conn, sessionHandle, preferredTrigger); err != nil {
 		return fmt.Errorf("bind portal shortcut: %w", err)
 	}
 
@@ -227,7 +271,7 @@ func runPortalDaemon(ctx context.Context, conn *dbus.Conn, client *extensionClie
 		)
 	}()
 
-	signalCh := make(chan *dbus.Signal, 32)
+	signalCh := make(chan *dbus.Signal, portalSignalBufferSize)
 	conn.Signal(signalCh)
 	defer conn.RemoveSignal(signalCh)
 	portalHeld := false
@@ -296,25 +340,29 @@ func runPortalDaemon(ctx context.Context, conn *dbus.Conn, client *extensionClie
 	}
 }
 
-func registerPortalAppID(conn *dbus.Conn) error {
+func registerPortalAppID(ctx context.Context, conn *dbus.Conn) error {
 	registry := conn.Object(portalBusName, portalDesktopPath)
+
+	callCtx, cancel := context.WithTimeout(ctx, setupCallTimeout)
+	defer cancel()
+
 	options := map[string]dbus.Variant{}
-	call := registry.Call(portalRegistryIface+".Register", 0, portalAppID, options)
+	call := registry.CallWithContext(callCtx, portalRegistryIface+".Register", 0, portalAppID, options)
 	if call.Err != nil {
-		return call.Err
+		return fmt.Errorf("register portal app id: %w", call.Err)
 	}
 
 	return nil
 }
 
-func runDoctor(conn *dbus.Conn, client *extensionClient) error {
+func runDoctor(ctx context.Context, conn *dbus.Conn, client *extensionClient) error {
 	if _, err := client.Status(); err != nil {
 		return fmt.Errorf("extension control interface unavailable: %w", err)
 	}
 	fmt.Println("[ok] extension DBus control reachable")
 
 	portalObj := conn.Object(portalBusName, portalDesktopPath)
-	version, err := readUint32Property(portalObj, portalGSInterface, "version")
+	version, err := readUint32Property(ctx, portalObj, portalGSInterface, "version")
 	if err != nil {
 		return fmt.Errorf("portal globalshortcuts unavailable: %w", err)
 	}
@@ -328,33 +376,35 @@ func runDoctor(conn *dbus.Conn, client *extensionClient) error {
 		fmt.Printf("[ok] companion engine reachable recording=%t processing=%t\n", engineRecording, engineProcessing)
 	}
 
-	if _, err := os.Open(defaultEvdevDevice); err != nil {
+	f, err := os.Open(defaultEvdevDevice)
+	if err != nil {
 		fmt.Printf("[warn] cannot read %s: %v\n", defaultEvdevDevice, err)
 	} else {
+		defer f.Close()
 		fmt.Printf("[ok] evdev device readable: %s\n", defaultEvdevDevice)
 	}
 
 	return nil
 }
 
-func runRestart(args []string, conn *dbus.Conn, client *extensionClient) error {
+func runRestart(ctx context.Context, args []string, conn *dbus.Conn, client *extensionClient) error {
 	fs := flag.NewFlagSet("restart", flag.ExitOnError)
 	skipExtensionReload := fs.Bool("no-extension-reload", false, "do not disable/enable the GNOME extension")
-	_ = fs.Parse(args)
+	fs.Parse(args)
 
 	fmt.Println("[step] restarting portal services")
-	if err := runUserSystemctl("restart", "xdg-desktop-portal-gnome.service"); err != nil {
+	if err := runUserSystemctl(ctx, "restart", "xdg-desktop-portal-gnome.service"); err != nil {
 		fmt.Printf("[warn] could not restart xdg-desktop-portal-gnome.service: %v\n", err)
 	}
-	if err := runUserSystemctl("restart", "xdg-desktop-portal.service"); err != nil {
+	if err := runUserSystemctl(ctx, "restart", "xdg-desktop-portal.service"); err != nil {
 		fmt.Printf("[warn] could not restart xdg-desktop-portal.service: %v\n", err)
 	}
 
 	fmt.Println("[step] restarting openwispr services")
-	if err := runUserSystemctl("restart", "openwispr-engine.service"); err != nil {
+	if err := runUserSystemctl(ctx, "restart", "openwispr-engine.service"); err != nil {
 		return fmt.Errorf("restart openwispr-engine.service: %w", err)
 	}
-	if err := runUserSystemctl("restart", "openwispr-hotkeyd.service"); err != nil {
+	if err := runUserSystemctl(ctx, "restart", "openwispr-hotkeyd.service"); err != nil {
 		fmt.Printf("[warn] could not restart openwispr-hotkeyd.service: %v\n", err)
 	}
 
@@ -365,9 +415,13 @@ func runRestart(args []string, conn *dbus.Conn, client *extensionClient) error {
 		}
 	}
 
-	time.Sleep(400 * time.Millisecond)
+	select {
+	case <-time.After(restartSettleDelay):
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	fmt.Println("[step] running health checks")
-	if err := runDoctor(conn, client); err != nil {
+	if err := runDoctor(ctx, conn, client); err != nil {
 		return err
 	}
 
@@ -375,8 +429,8 @@ func runRestart(args []string, conn *dbus.Conn, client *extensionClient) error {
 	return nil
 }
 
-func runUserSystemctl(args ...string) error {
-	cmd := exec.Command("systemctl", append([]string{"--user"}, args...)...)
+func runUserSystemctl(ctx context.Context, args ...string) error {
+	cmd := exec.CommandContext(ctx, "systemctl", append([]string{"--user"}, args...)...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		trimmed := strings.TrimSpace(string(output))
@@ -394,34 +448,34 @@ func reloadExtension(conn *dbus.Conn) error {
 
 	var disabled bool
 	if err := obj.Call(extensionsInterface+".DisableExtension", 0, extensionUUID).Store(&disabled); err != nil {
-		return err
+		return fmt.Errorf("disable extension: %w", err)
 	}
 
 	var enabled bool
 	if err := obj.Call(extensionsInterface+".EnableExtension", 0, extensionUUID).Store(&enabled); err != nil {
-		return err
+		return fmt.Errorf("enable extension: %w", err)
 	}
 
 	if !enabled {
 		return fmt.Errorf("extension %s did not report enabled", extensionUUID)
 	}
 
-	_ = disabled
 	return nil
 }
 
-func portalCreateSession(conn *dbus.Conn) (dbus.ObjectPath, error) {
+func portalCreateSession(ctx context.Context, conn *dbus.Conn) (dbus.ObjectPath, error) {
 	obj := conn.Object(portalBusName, portalDesktopPath)
-	handleToken := fmt.Sprintf("openwispr_hs_%d", time.Now().UnixNano())
-	sessionToken := fmt.Sprintf("openwispr_session_%d", time.Now().UnixNano())
+	now := time.Now().UnixNano()
+	handleToken := fmt.Sprintf("openwispr_hs_%d", now)
+	sessionToken := fmt.Sprintf("openwispr_session_%d", now)
 	expectedRequestPath, err := portalRequestPathForToken(conn, handleToken)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("portal request path: %w", err)
 	}
 
 	sigCh, cleanup, err := watchRequestResponses(conn)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("watch portal responses: %w", err)
 	}
 	defer cleanup()
 
@@ -430,9 +484,11 @@ func portalCreateSession(conn *dbus.Conn) (dbus.ObjectPath, error) {
 		"session_handle_token": dbus.MakeVariant(sessionToken),
 	}
 
+	callCtx, cancel := context.WithTimeout(ctx, setupCallTimeout)
+	defer cancel()
 	var requestPath dbus.ObjectPath
-	if err := obj.Call(portalGSInterface+".CreateSession", 0, options).Store(&requestPath); err != nil {
-		return "", err
+	if err := obj.CallWithContext(callCtx, portalGSInterface+".CreateSession", 0, options).Store(&requestPath); err != nil {
+		return "", fmt.Errorf("create portal session: %w", err)
 	}
 
 	responseCode, results, err := awaitRequestResponse(sigCh, []dbus.ObjectPath{requestPath, expectedRequestPath}, 15*time.Second)
@@ -459,17 +515,17 @@ func portalCreateSession(conn *dbus.Conn) (dbus.ObjectPath, error) {
 	return "", fmt.Errorf("unexpected session_handle type: %T", sessionAny.Value())
 }
 
-func portalBindShortcut(conn *dbus.Conn, sessionHandle dbus.ObjectPath, preferredTrigger string) error {
+func portalBindShortcut(ctx context.Context, conn *dbus.Conn, sessionHandle dbus.ObjectPath, preferredTrigger string) error {
 	obj := conn.Object(portalBusName, portalDesktopPath)
 	handleToken := fmt.Sprintf("openwispr_bind_%d", time.Now().UnixNano())
 	expectedRequestPath, err := portalRequestPathForToken(conn, handleToken)
 	if err != nil {
-		return err
+		return fmt.Errorf("portal request path: %w", err)
 	}
 
 	sigCh, cleanup, err := watchRequestResponses(conn)
 	if err != nil {
-		return err
+		return fmt.Errorf("watch portal responses: %w", err)
 	}
 	defer cleanup()
 
@@ -487,9 +543,11 @@ func portalBindShortcut(conn *dbus.Conn, sessionHandle dbus.ObjectPath, preferre
 		"handle_token": dbus.MakeVariant(handleToken),
 	}
 
+	callCtx, cancel := context.WithTimeout(ctx, setupCallTimeout)
+	defer cancel()
 	var requestPath dbus.ObjectPath
-	if err := obj.Call(portalGSInterface+".BindShortcuts", 0, sessionHandle, shortcuts, "", options).Store(&requestPath); err != nil {
-		return err
+	if err := obj.CallWithContext(callCtx, portalGSInterface+".BindShortcuts", 0, sessionHandle, shortcuts, "", options).Store(&requestPath); err != nil {
+		return fmt.Errorf("bind portal shortcuts: %w", err)
 	}
 
 	responseCode, _, err := awaitRequestResponse(sigCh, []dbus.ObjectPath{requestPath, expectedRequestPath}, 30*time.Second)
@@ -511,7 +569,7 @@ func watchRequestResponses(conn *dbus.Conn) (chan *dbus.Signal, func(), error) {
 		return nil, nil, err
 	}
 
-	sigCh := make(chan *dbus.Signal, 4)
+	sigCh := make(chan *dbus.Signal, requestSignalBufferSize)
 	conn.Signal(sigCh)
 
 	cleanup := func() {
@@ -631,7 +689,7 @@ func (c *extensionClient) callStore(method string, storeTargets any, args ...any
 	var lastErr error
 
 	for _, obj := range c.objs {
-		call := obj.Call(method, 0, args...)
+		call := obj.CallWithContext(c.ctx, method, 0, args...)
 
 		var err error
 		switch targets := storeTargets.(type) {
@@ -646,40 +704,25 @@ func (c *extensionClient) callStore(method string, storeTargets any, args ...any
 		}
 
 		lastErr = err
-		if !isUnavailableDBusError(err) {
-			return err
+		if !isPortalUnavailable(err) {
+			return fmt.Errorf("dbus call %s: %w", method, err)
 		}
 	}
 
 	if lastErr != nil {
-		return lastErr
+		return fmt.Errorf("dbus call %s: %w", method, lastErr)
 	}
 
 	return errors.New("no DBus destinations configured")
 }
 
-func isUnavailableDBusError(err error) bool {
-	var dbusErr dbus.Error
-	if !errors.As(err, &dbusErr) {
-		return false
-	}
-
-	switch dbusErr.Name {
-	case "org.freedesktop.DBus.Error.ServiceUnknown",
-		"org.freedesktop.DBus.Error.NameHasNoOwner",
-		"org.freedesktop.DBus.Error.UnknownObject",
-		"org.freedesktop.DBus.Error.UnknownMethod":
-		return true
-	default:
-		return false
-	}
-}
-
-func readUint32Property(obj dbus.BusObject, iface, property string) (uint32, error) {
+func readUint32Property(ctx context.Context, obj dbus.BusObject, iface, property string) (uint32, error) {
+	callCtx, cancel := context.WithTimeout(ctx, setupCallTimeout)
+	defer cancel()
 	var value dbus.Variant
-	err := obj.Call("org.freedesktop.DBus.Properties.Get", 0, iface, property).Store(&value)
+	err := obj.CallWithContext(callCtx, "org.freedesktop.DBus.Properties.Get", 0, iface, property).Store(&value)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("get property %s.%s: %w", iface, property, err)
 	}
 
 	u32, ok := value.Value().(uint32)
@@ -703,9 +746,4 @@ Usage:
   openwispr daemon [--backend auto|portal|evdev] [--trigger <Super>z] [--device /dev/input/... ] [--evdev-key z]
   openwispr engine
 `)
-}
-
-func fatalf(format string, args ...any) {
-	log.Printf(format, args...)
-	os.Exit(1)
 }
