@@ -138,6 +138,7 @@ Use this path if you want to skip local Whisper binaries and models.
     *   If using hold-to-speak, just release the hold key/chord.
     *   The extension trims silence with ffmpeg (if enabled), transcribes, then optionally runs LLM cleanup.
     *   Once complete, the text will be automatically pasted into your active window and copied to your clipboard.
+    *   While transcription is processing, click the indicator or trigger the toggle shortcut again to cancel it. A cancelled result is discarded and is never pasted.
 
 ### Companion CLI
 
@@ -191,6 +192,7 @@ go build -o ~/.local/bin/openwispr ./cmd/openwispr
 openwispr toggle
 openwispr start
 openwispr stop
+openwispr cancel
 openwispr status
 openwispr doctor
 openwispr restart
@@ -202,6 +204,10 @@ Quick DBus check (extension must be enabled):
 ```bash
 gdbus call --session --dest org.gnome.Shell.Extensions.OpenWispr --object-path /org/gnome/Shell/Extensions/OpenWispr --method org.gnome.Shell.Extensions.OpenWispr.Status
 ```
+
+`openwispr cancel` and the panel toggle cancel the current transcription when one is
+processing. Provider failures show a short, actionable notification; diagnostic
+details remain in the GNOME Shell and companion logs.
 
 If you just changed extension code and DBus is still missing, log out and back in once to fully restart GNOME Shell.
 
