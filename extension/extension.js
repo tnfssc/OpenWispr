@@ -13,6 +13,8 @@ import { Extension, gettext as _ } from 'resource:///org/gnome/shell/extensions/
 const DEBUG_LOGS = false;
 const DEBUG_TRANSCRIPTS = false;
 const CLIPBOARD_RESTORE_DELAY_MS = 100;
+const PASTE_METHODS = ['ctrl-v', 'ctrl-shift-v', 'shift-insert', 'clipboard-only'];
+const MAX_CLIPBOARD_PAYLOAD_BYTES = 8 * 1024 * 1024;
 const DBUS_CONTROL_BUS_NAME = 'org.gnome.Shell.Extensions.OpenWispr';
 const DBUS_CONTROL_PATH = '/org/gnome/Shell/Extensions/OpenWispr';
 const COMPANION_BUS_NAME = 'io.github.tnfssc.OpenWispr.Recorder';
@@ -102,7 +104,9 @@ class OpenWisprController {
         this._holdToSpeakBinding = this._parseAccelerator(
             this._settings.get_strv('hold-to-speak-keybinding')[0] || ''
         );
-        this._autoPasteEnabled = this._settings.get_boolean('auto-paste-enabled');
+        this._pasteMethod = this._normalizePasteMethod(this._settings.get_string('paste-method'));
+        if (this._settings.get_string('paste-method') !== this._pasteMethod)
+            this._settings.set_string('paste-method', this._pasteMethod);
         this._restoreClipboardEnabled = this._settings.get_boolean('restore-clipboard-enabled');
         this._notificationsEnabled = this._settings.get_boolean('notifications-enabled');
         this._companionProxy = null;
@@ -204,9 +208,11 @@ class OpenWisprController {
             }
         });
 
-        this._autoPasteChangedId = this._settings.connect('changed::auto-paste-enabled', () => {
+        this._pasteMethodChangedId = this._settings.connect('changed::paste-method', () => {
             if (this._enabled === false) return;
-            this._autoPasteEnabled = this._settings.get_boolean('auto-paste-enabled');
+            this._pasteMethod = this._normalizePasteMethod(this._settings.get_string('paste-method'));
+            if (this._settings.get_string('paste-method') !== this._pasteMethod)
+                this._settings.set_string('paste-method', this._pasteMethod);
         });
 
         this._restoreClipboardChangedId = this._settings.connect('changed::restore-clipboard-enabled', () => {
@@ -255,9 +261,9 @@ class OpenWisprController {
             this._holdToSpeakChangedId = null;
         }
 
-        if (this._settings && this._autoPasteChangedId) {
-            this._settings.disconnect(this._autoPasteChangedId);
-            this._autoPasteChangedId = null;
+        if (this._settings && this._pasteMethodChangedId) {
+            this._settings.disconnect(this._pasteMethodChangedId);
+            this._pasteMethodChangedId = null;
         }
 
         if (this._settings && this._restoreClipboardChangedId) {
@@ -850,6 +856,10 @@ class OpenWisprController {
         return provider;
     }
 
+    _normalizePasteMethod(method) {
+        return PASTE_METHODS.includes(method) ? method : 'ctrl-v';
+    }
+
     _migrateLegacySettings() {
         const sttProvider = this._settings.get_string('stt-provider');
         if (sttProvider === 'grok')
@@ -870,23 +880,59 @@ class OpenWisprController {
     }
 
     _injectText(text) {
-        // Clutter Virtual Input
         try {
-            const clipboard = St.Clipboard.get_default();
-            
-            // Capture original clipboard content if restore feature is enabled
             if (this._restoreClipboardEnabled) {
-                clipboard.get_text(St.ClipboardType.CLIPBOARD, (_cb, originalClipboard) => {
-                    this._debug(`Captured original clipboard (${originalClipboard ? originalClipboard.length : 0} chars)`);
-                    this._injectTextWithClipboard(text, originalClipboard);
-                });
+                this._captureClipboard(originalClipboard => this._injectTextWithClipboard(text, originalClipboard));
             } else {
-                this._injectTextWithClipboard(text, null);
+                this._injectTextWithClipboard(text, { text: null, content: null });
             }
         } catch (e) {
             console.error(`[openwispr-gnome-extension] Injection failed: ${e}`);
-            this._notify(`Copied to clipboard: ${text}`);
+            this._notify('Transcription copied to clipboard.');
         }
+    }
+
+    _captureClipboard(callback) {
+        const clipboard = St.Clipboard.get_default();
+        clipboard.get_text(St.ClipboardType.CLIPBOARD, (_cb, originalText) => {
+            const original = { text: originalText, content: null };
+            try {
+                const selection = global.display.get_selection();
+                const mimes = selection?.get_mimetypes?.(Meta.SelectionType.SELECTION_CLIPBOARD) ?? [];
+                const preferredMimes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'text/uri-list'];
+                const nonText = preferredMimes.find(mime => mimes.includes(mime))
+                    ?? mimes.find(mime => mime.startsWith('image/'));
+                if (!nonText) {
+                    callback(original);
+                    return;
+                }
+                const output = Gio.MemoryOutputStream.new_resizable();
+                selection.transfer_async(
+                    Meta.SelectionType.SELECTION_CLIPBOARD,
+                    nonText,
+                    MAX_CLIPBOARD_PAYLOAD_BYTES,
+                    output,
+                    null,
+                    (_selection, result) => {
+                    try {
+                        const transferred = selection.transfer_finish(result);
+                        output.close(null);
+                        if (transferred) {
+                            const bytes = output.steal_as_bytes();
+                            if (bytes.get_size() > 0 && bytes.get_size() <= MAX_CLIPBOARD_PAYLOAD_BYTES)
+                                original.content = { mimeType: nonText, data: bytes };
+                        }
+                    } catch (e) {
+                        console.error(`[openwispr-gnome-extension] Failed to capture non-text clipboard: ${e}`);
+                    }
+                    callback(original);
+                    }
+                );
+            } catch (e) {
+                console.error(`[openwispr-gnome-extension] Failed to inspect clipboard: ${e}`);
+                callback(original);
+            }
+        });
     }
 
     _injectTextWithClipboard(text, originalClipboard) {
@@ -898,7 +944,7 @@ class OpenWisprController {
             const clipboard = St.Clipboard.get_default();
             clipboard.set_text(St.ClipboardType.CLIPBOARD, text);
 
-            if (!this._autoPasteEnabled) {
+            if (this._pasteMethod === 'clipboard-only') {
                 this._notify('Transcription copied to clipboard.');
                 return;
             }
@@ -917,19 +963,20 @@ class OpenWisprController {
             // an event time in ms; monotonic time with 1ms increments risks collisions
             // and out-of-order events under load.
             const pressTime = global.get_current_time();
-            // Ctrl Press
-            virtualDevice.notify_keyval(pressTime, Clutter.KEY_Control_L, Clutter.KeyState.PRESSED);
-            // V Press
-            virtualDevice.notify_keyval(pressTime + 1, Clutter.KEY_v, Clutter.KeyState.PRESSED);
-            // V Release
-            virtualDevice.notify_keyval(pressTime + 2, Clutter.KEY_v, Clutter.KeyState.RELEASED);
-            // Ctrl Release
-            virtualDevice.notify_keyval(pressTime + 3, Clutter.KEY_Control_L, Clutter.KeyState.RELEASED);
+            const chord = this._pasteMethod === 'shift-insert'
+                ? [Clutter.KEY_Shift_L, Clutter.KEY_Insert]
+                : this._pasteMethod === 'ctrl-shift-v'
+                    ? [Clutter.KEY_Control_L, Clutter.KEY_Shift_L, Clutter.KEY_v]
+                    : [Clutter.KEY_Control_L, Clutter.KEY_v];
+            chord.forEach((key, index) =>
+                virtualDevice.notify_keyval(pressTime + index, key, Clutter.KeyState.PRESSED));
+            chord.slice().reverse().forEach((key, index) =>
+                virtualDevice.notify_keyval(pressTime + chord.length + index, key, Clutter.KeyState.RELEASED));
             
             this._debug('Text injected via clipboard paste');
             
             // Restore original clipboard after a short delay to ensure paste completes
-            if (this._restoreClipboardEnabled && originalClipboard !== null) {
+            if (this._restoreClipboardEnabled && (originalClipboard?.text !== null || originalClipboard?.content)) {
                 const sourceId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, CLIPBOARD_RESTORE_DELAY_MS, () => {
                     this._clipboardRestoreSourceIds?.delete(sourceId);
 
@@ -942,8 +989,10 @@ class OpenWisprController {
                         // Check if clipboard still contains our transcription text (guardrail)
                         clipboard.get_text(St.ClipboardType.CLIPBOARD, (_cb, currentClipboard) => {
                             if (currentClipboard === text) {
-                                // Safe to restore
-                                clipboard.set_text(St.ClipboardType.CLIPBOARD, originalClipboard);
+                                if (originalClipboard.content)
+                                    clipboard.set_content(St.ClipboardType.CLIPBOARD, originalClipboard.content.mimeType, originalClipboard.content.data);
+                                else if (originalClipboard.text !== null)
+                                    clipboard.set_text(St.ClipboardType.CLIPBOARD, originalClipboard.text);
                                 this._debug('Restored original clipboard content');
                             } else {
                                 // User copied something else in the meantime, don't overwrite
