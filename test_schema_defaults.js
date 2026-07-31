@@ -12,6 +12,7 @@ import GLib from 'gi://GLib';
 // call sites so the intent (enabled vs disabled default) is explicit.
 const ENABLED = true;
 const DISABLED = false;
+const ALLOWED_PASTE_METHODS = ['ctrl-v', 'ctrl-shift-v', 'shift-insert', 'clipboard-only'];
 
 // Exact key count asserted by settings.list_keys(). The schema XML defines
 // 26 keys; update this constant alongside the .xml when keys are added or
@@ -113,7 +114,9 @@ try {
     assertEqual(defaultValue(schema, 'hold-to-speak-trigger'), '', "'hold-to-speak-trigger' default");
     assertEqual(defaultValue(schema, 'hold-to-speak-keybinding').length, 0, "'hold-to-speak-keybinding' default is empty");
 
-    assertEqual(defaultValue(schema, 'auto-paste-enabled'), ENABLED, "'auto-paste-enabled' default");
+    assertEqual(defaultValue(schema, 'paste-method'), 'ctrl-v', "'paste-method' default");
+    for (const method of ALLOWED_PASTE_METHODS)
+        assertTrue(ALLOWED_PASTE_METHODS.includes(method), `'paste-method' allows ${method}`);
     assertEqual(defaultValue(schema, 'restore-clipboard-enabled'), ENABLED, "'restore-clipboard-enabled' default");
     assertEqual(defaultValue(schema, 'notifications-enabled'), ENABLED, "'notifications-enabled' default");
 

@@ -1,6 +1,7 @@
 import Adw from 'gi://Adw';
 import Gdk from 'gi://Gdk';
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk';
 
 import { ExtensionPreferences, gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
@@ -93,13 +94,33 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
             _('Click Set, then press the key combination.')
         );
 
-        const autoPasteRow = new Adw.SwitchRow({
-            title: _('Auto Paste Transcription'),
-            subtitle: _('Turn off for apps where paste causes side effects.'),
-            active: settings.get_boolean('auto-paste-enabled'),
+        const pasteMethods = ['ctrl-v', 'ctrl-shift-v', 'shift-insert', 'clipboard-only'];
+        const pasteLabels = [
+            _('Ctrl+V (standard paste)'),
+            _('Ctrl+Shift+V (terminal paste)'),
+            _('Shift+Insert'),
+            _('Clipboard only'),
+        ];
+        const pasteModel = Gtk.StringList.new(pasteLabels);
+        const pasteRow = new Adw.ComboRow({
+            title: _('Transcription Insertion'),
+            subtitle: _('Choose how transcription is inserted into the active application.'),
+            model: pasteModel,
         });
-        autoPasteRow.connect('notify::active', () => settings.set_boolean('auto-paste-enabled', autoPasteRow.active));
-        shortcutsGroup.add(autoPasteRow);
+        let pasteMethod = settings.get_string('paste-method');
+        if (!pasteMethods.includes(pasteMethod))
+            pasteMethod = 'ctrl-v';
+        pasteRow.selected = pasteMethods.indexOf(pasteMethod);
+        pasteRow.connect('notify::selected', () => settings.set_string('paste-method', pasteMethods[pasteRow.selected]));
+        shortcutsGroup.add(pasteRow);
+        const sessionType = GLib.getenv('XDG_SESSION_TYPE') || '';
+        const sessionSubtitle = sessionType === 'wayland'
+            ? _('Wayland may restrict synthetic key input in terminals or sandboxed fields. Use Ctrl+Shift+V for terminals or Clipboard only when insertion is blocked.')
+            : _('Use Ctrl+Shift+V for terminals; Clipboard only avoids synthetic key input.');
+        shortcutsGroup.add(new Adw.ActionRow({
+            title: _('Session guidance'),
+            subtitle: sessionSubtitle,
+        }));
 
         const restoreClipboardRow = new Adw.SwitchRow({
             title: _('Restore Clipboard'),

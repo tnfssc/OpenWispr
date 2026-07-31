@@ -20,7 +20,7 @@ Also checkout [OpenWispr for macOS](https://github.com/tnfssc/OpenWispr)
 - **LLM Transcript Cleanup**: Optionally post-process transcript text with OpenAI or Groq models.
 - **Companion Engine + Daemon**: Uses `openwispr` user services over D-Bus for recording/transcription and optional hold daemon shortcuts.
 - **System Integration**: Seamless integration with the GNOME top bar.
-- **Clipboard Injection**: Automatically pastes transcribed text into the active text field.
+- **Clipboard Injection**: Inserts transcribed text with Ctrl+V, Ctrl+Shift+V, Shift+Insert, or clipboard-only mode.
 - **Clipboard Restore**: Optionally restore original clipboard content after auto-paste (enabled by default).
 - **Clipboard-Only Mode**: Optionally copy transcription without auto-paste for apps where paste is unsafe.
 - **Configurable Notifications**: Optionally enable or disable extension notifications.
@@ -289,7 +289,7 @@ sudo usermod -aG input "$USER"
 
 Note: the GitHub Release companion binaries are built with `CGO_ENABLED=0` for portability, so evdev fallback is disabled there. Build from source on Linux with cgo enabled if you need evdev fallback.
 
-> Note: Some apps (especially terminals, password fields, or secure/sandboxed inputs) may block simulated paste events. In those cases, use clipboard paste manually.
+> Note: Some apps (especially terminals, password fields, or secure/sandboxed inputs) may block simulated paste events. Choose Ctrl+Shift+V for terminals, or Clipboard only on restricted Wayland/sandbox fields.
 
 ## Configuration
 
@@ -315,9 +315,9 @@ For start/stop split bindings (optional):
 *   **Name**: `openwispr-stop`
 *   **Command**: `openwispr stop`
 
-Auto-paste behavior can be toggled in extension preferences or via:
+Transcription insertion is configured in extension preferences or via:
 *   **Schema**: `org.gnome.shell.extensions.openwispr`
-*   **Key**: `auto-paste-enabled`
+*   **Key**: `paste-method` (`ctrl-v`, `ctrl-shift-v`, `shift-insert`, or `clipboard-only`; defaults to `ctrl-v`)
 
 Clipboard restore behavior can be toggled in extension preferences or via:
 *   **Schema**: `org.gnome.shell.extensions.openwispr`

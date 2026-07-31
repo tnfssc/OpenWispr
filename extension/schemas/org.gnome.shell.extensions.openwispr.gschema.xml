@@ -13,9 +13,9 @@
       <default>[]</default>
       <summary>Legacy hold to speak keybinding</summary>
     </key>
-    <key name="auto-paste-enabled" type="b">
-      <default>true</default>
-      <summary>Automatically paste transcribed text into active app</summary>
+    <key name="paste-method" type="s">
+      <default>'ctrl-v'</default>
+      <summary>Transcription insertion method</summary>
     </key>
     <key name="restore-clipboard-enabled" type="b">
       <default>true</default>
