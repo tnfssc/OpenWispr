@@ -141,6 +141,15 @@ func run(args []string) error {
 			return fmt.Errorf("stop failed: %w", err)
 		}
 		fmt.Printf("stopped=%t\n", stopped)
+	case "cancel":
+		if len(args) != 2 {
+			return errors.New("cancel does not accept arguments")
+		}
+		cancelled, err := client.Cancel("cli")
+		if err != nil {
+			return fmt.Errorf("cancel failed: %w", err)
+		}
+		fmt.Printf("cancelled=%t\n", cancelled)
 	case "status":
 		s, err := client.Status()
 		if err != nil {
@@ -679,6 +688,12 @@ func (c *extensionClient) Stop(transcribe bool, source string) (bool, error) {
 	return stopped, err
 }
 
+func (c *extensionClient) Cancel(source string) (bool, error) {
+	var cancelled bool
+	err := c.callStore(extensionInterface+".Cancel", &cancelled, source)
+	return cancelled, err
+}
+
 func (c *extensionClient) Status() (status, error) {
 	var s status
 	err := c.callStore(extensionInterface+".Status", []any{&s.Recording, &s.Processing, &s.Trigger})
@@ -740,6 +755,7 @@ Usage:
   openwispr toggle
   openwispr start
   openwispr stop
+  openwispr cancel
   openwispr status
   openwispr doctor
   openwispr restart [--no-extension-reload]

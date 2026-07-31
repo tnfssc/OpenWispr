@@ -24,6 +24,7 @@ const COMPANION_INTERFACE = 'io.github.tnfssc.OpenWispr.Recorder';
 // full pipeline (whisper + up to 240s HTTP transcription), so it gets a long ceiling.
 const COMPANION_START_TIMEOUT_MS = 15000;
 const COMPANION_STOP_TIMEOUT_MS = 300000;
+const MAX_NOTIFICATION_LENGTH = 240;
 // Hold-to-speak: ignore keypresses this soon after a hold-release stop, to debounce
 // rapid re-press from the same physical key actuation.
 const HOLD_COOLDOWN_US = 750000;
@@ -63,6 +64,10 @@ const DBUS_CONTROL_IFACE = `
       <arg name="transcribe" type="b" direction="in"/>
       <arg name="source" type="s" direction="in"/>
       <arg name="stopped" type="b" direction="out"/>
+    </method>
+    <method name="Cancel">
+      <arg name="source" type="s" direction="in"/>
+      <arg name="cancelled" type="b" direction="out"/>
     </method>
     <method name="Status">
       <arg name="recording" type="b" direction="out"/>
@@ -155,6 +160,7 @@ class OpenWisprController {
                 Toggle: source => this.Toggle(source),
                 Start: source => this.Start(source),
                 Stop: (transcribe, source) => this.Stop(transcribe, source),
+                Cancel: source => this.Cancel(source),
                 Status: () => this.Status(),
             };
             this._dbusNameOwnerId = Gio.DBus.own_name(
@@ -241,6 +247,7 @@ class OpenWisprController {
         this._stopCancellable?.cancel();
         this._startCancellable = null;
         this._stopCancellable = null;
+        this._cancelTranscription();
 
         this._stopRecording(false); // Force stop without transcription if disabling
         this._clearClipboardRestoreSources();
@@ -335,7 +342,7 @@ class OpenWisprController {
         const trimmed = source.trim();
         if (trimmed.length === 0 || trimmed.length > 64)
             return null;
-        const ALLOWED_SOURCES = ['external', 'hotkeyd', 'evdev'];
+        const ALLOWED_SOURCES = ['external', 'hotkeyd', 'evdev', 'cli'];
         if (ALLOWED_SOURCES.includes(trimmed) || trimmed.startsWith('portal:'))
             return trimmed;
         return null;
@@ -393,6 +400,22 @@ class OpenWisprController {
         return true;
     }
 
+    Cancel(source) {
+        const triggerSource = this._validateSource(source);
+        if (triggerSource === null) {
+            this._debug(`Rejecting DBus cancel from unknown source: ${source}`);
+            return false;
+        }
+
+        if (!this._processing) {
+            this._debug(`Ignoring DBus cancel from ${triggerSource}: nothing is processing`);
+            return false;
+        }
+
+        this._debug(`DBus cancel requested by ${triggerSource}`);
+        return this._cancelTranscription();
+    }
+
     Status() {
         return [
             this._recording,
@@ -404,6 +427,8 @@ class OpenWisprController {
     _toggleRecording() {
         if (this._recording) {
             this._stopRecording(true);
+        } else if (this._processing) {
+            this._cancelTranscription();
         } else {
             this._startRecording('toggle');
         }
@@ -669,6 +694,7 @@ class OpenWisprController {
 
         this._recording = false;
         this._processing = true;
+        this._cancelRequested = false;
         this._setPanelIconState('processing');
 
         const proxy = this._getCompanionProxy();
@@ -718,10 +744,21 @@ class OpenWisprController {
                     }
 
                     // transcribe=true — wait for the TranscriptionComplete signal.
-                    this._pendingTranscription = { token, transcribe };
+                    this._pendingTranscription = {
+                        token,
+                        transcribe,
+                        cancelled: this._cancelRequested,
+                    };
+                    const earlySignal = this._earlyTranscriptionSignals.get(token);
+                    if (earlySignal) {
+                        this._earlyTranscriptionSignals.delete(token);
+                        this._handleTranscriptionComplete(token, ...earlySignal);
+                    } else if (this._cancelRequested) {
+                        this._requestCompanionCancel(token);
+                    }
                 } catch (e) {
                     console.error(`[openwispr-gnome-extension] Companion stop failed: ${e}`);
-                    this._notifyError('Companion transcription failed.');
+                    this._notifyError('Could not stop recording. Try again.');
                     this._companionProxy = null;
                     this._resetState();
                 }
@@ -738,15 +775,34 @@ class OpenWisprController {
 
         const [token, transcript, errStr] = params.deep_unpack();
 
+        if (!this._pendingTranscription || this._pendingTranscription.token !== token) {
+            // Stop replies and signals are independent D-Bus messages. Keep a
+            // small early-delivery cache so a signal cannot race token setup.
+            if (this._processing && token && this._earlyTranscriptionSignals.size < 8)
+                this._earlyTranscriptionSignals.set(token, [transcript, errStr]);
+            return;
+        }
+
+        this._handleTranscriptionComplete(token, transcript, errStr);
+    }
+
+    _handleTranscriptionComplete(token, transcript, errStr) {
         if (!this._pendingTranscription || this._pendingTranscription.token !== token)
             return;
 
-        const { transcribe } = this._pendingTranscription;
+        const { transcribe, cancelled } = this._pendingTranscription;
         this._pendingTranscription = null;
+        this._cancelRequests.delete(token);
+
+        if (cancelled) {
+            this._debug(`Discarding cancelled transcription result (${token}).`);
+            this._resetState();
+            return;
+        }
 
         if (errStr) {
             console.error(`[openwispr-gnome-extension] Companion transcription failed: ${errStr}`);
-            this._notifyError('Companion transcription failed.');
+            this._notifyError(this._userSafeCompanionError(errStr));
             this._resetState();
             return;
         }
@@ -767,6 +823,60 @@ class OpenWisprController {
         }
 
         this._resetState();
+    }
+
+    _cancelTranscription() {
+        this._cancelRequested = true;
+        const pending = this._pendingTranscription;
+        if (!pending)
+            return this._processing;
+
+        if (pending.cancelled)
+            return true;
+
+        pending.cancelled = true;
+        this._requestCompanionCancel(pending.token);
+        return true;
+    }
+
+    _requestCompanionCancel(token) {
+        if (!token || this._cancelRequests.has(token))
+            return;
+        this._cancelRequests.add(token);
+
+        const proxy = this._companionProxy;
+        if (!proxy)
+            return;
+
+        proxy.call(
+            'Cancel',
+            new GLib.Variant('(s)', [token]),
+            Gio.DBusCallFlags.NONE,
+            COMPANION_START_TIMEOUT_MS,
+            null,
+            (dbusProxy, res) => {
+                try {
+                    dbusProxy.call_finish(res);
+                } catch (e) {
+                    // Cancellation is best effort; never present it as a
+                    // transcription failure or expose D-Bus details to users.
+                    console.error(`[openwispr-gnome-extension] Companion cancel failed: ${e}`);
+                }
+            }
+        );
+    }
+
+    _userSafeCompanionError(error) {
+        const detail = String(error || '').toLowerCase();
+        if (detail.includes('api key') || detail.includes('unauthorized') ||
+            detail.includes('authentication') || detail.includes('forbidden'))
+            return 'Transcription failed: check your provider API key.';
+        if (detail.includes('timeout') || detail.includes('deadline'))
+            return 'Transcription timed out. Check your connection and try again.';
+        if (detail.includes('connect') || detail.includes('network') ||
+            detail.includes('http'))
+            return 'Transcription could not reach the provider. Check your connection.';
+        return 'Transcription failed. Check provider settings and try again.';
     }
 
     _getCompanionProxy() {
@@ -969,14 +1079,17 @@ class OpenWisprController {
         if (!this._notificationsEnabled)
             return;
 
-        Main.notify('openwispr-gnome-extension', message);
+        Main.notify('openwispr-gnome-extension', String(message).slice(0, MAX_NOTIFICATION_LENGTH));
     }
 
     _notifyError(message) {
         if (!this._notificationsEnabled)
             return;
 
-        Main.notify('openwispr-gnome-extension Error', message);
+        Main.notify(
+            'openwispr-gnome-extension Error',
+            String(message).slice(0, MAX_NOTIFICATION_LENGTH)
+        );
     }
 
     _initState() {
@@ -991,6 +1104,10 @@ class OpenWisprController {
         this._holdStartCooldownUntilUs = 0;
         this._startCancellable = null;
         this._stopCancellable = null;
+        this._pendingTranscription = null;
+        this._earlyTranscriptionSignals = new Map();
+        this._cancelRequests = new Set();
+        this._cancelRequested = false;
         this._virtualKeyboard = null;
     }
 
@@ -999,6 +1116,10 @@ class OpenWisprController {
         // indicator/_icon exists (i.e. from enable()'s later init or from callbacks).
         this._recording = false;
         this._processing = false;
+        this._pendingTranscription = null;
+        this._earlyTranscriptionSignals?.clear();
+        this._cancelRequests?.clear();
+        this._cancelRequested = false;
         this._recordingTrigger = null;
         this._remoteHoldBinding = null;
         // A held key may still be physically down when a stop fires; clear it so
