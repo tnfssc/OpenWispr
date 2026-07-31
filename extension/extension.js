@@ -695,6 +695,7 @@ class OpenWisprController {
         this._recording = false;
         this._processing = true;
         this._cancelRequested = false;
+        this._awaitingTranscriptionToken = Boolean(transcribe);
         this._setPanelIconState('processing');
 
         const proxy = this._getCompanionProxy();
@@ -744,6 +745,7 @@ class OpenWisprController {
                     }
 
                     // transcribe=true — wait for the TranscriptionComplete signal.
+                    this._awaitingTranscriptionToken = false;
                     this._pendingTranscription = {
                         token,
                         transcribe,
@@ -826,10 +828,13 @@ class OpenWisprController {
     }
 
     _cancelTranscription() {
+        if (!this._pendingTranscription && !this._awaitingTranscriptionToken)
+            return false;
+
         this._cancelRequested = true;
         const pending = this._pendingTranscription;
         if (!pending)
-            return this._processing;
+            return true;
 
         if (pending.cancelled)
             return true;
@@ -1105,6 +1110,7 @@ class OpenWisprController {
         this._startCancellable = null;
         this._stopCancellable = null;
         this._pendingTranscription = null;
+        this._awaitingTranscriptionToken = false;
         this._earlyTranscriptionSignals = new Map();
         this._cancelRequests = new Set();
         this._cancelRequested = false;
@@ -1117,6 +1123,7 @@ class OpenWisprController {
         this._recording = false;
         this._processing = false;
         this._pendingTranscription = null;
+        this._awaitingTranscriptionToken = false;
         this._earlyTranscriptionSignals?.clear();
         this._cancelRequests?.clear();
         this._cancelRequested = false;
