@@ -898,27 +898,35 @@ class OpenWisprController {
             const original = { text: originalText, content: null };
             try {
                 const selection = global.display.get_selection();
-                const mimes = selection?.get_mimetypes?.() ?? [];
+                const mimes = selection?.get_mimetypes?.(Meta.SelectionType.CLIPBOARD) ?? [];
                 const nonText = mimes.includes('image/png')
                     ? 'image/png'
-                    : mimes.find(mime => mime.startsWith('image/'));
+                    : mimes.find(mime => mime.startsWith('image/') || mime === 'text/uri-list');
                 if (!nonText) {
                     callback(original);
                     return;
                 }
-                selection.transfer_async(nonText, null, (_selection, result) => {
+                const output = Gio.MemoryOutputStream.new_resizable();
+                selection.transfer_async(
+                    Meta.SelectionType.CLIPBOARD,
+                    nonText,
+                    MAX_CLIPBOARD_PAYLOAD_BYTES,
+                    output,
+                    null,
+                    (_selection, result) => {
                     try {
-                        const bytes = selection.transfer_finish(result);
-                        const data = bytes?.get_data?.();
-                        const payload = data?.[0] ?? data;
-                        const size = data?.[1] ?? payload?.byteLength ?? 0;
-                        if (payload && size > 0 && size <= MAX_CLIPBOARD_PAYLOAD_BYTES)
-                            original.content = { mimeType: nonText, data: payload };
+                        if (selection.transfer_finish(result)) {
+                            output.close(null);
+                            const bytes = output.steal_as_bytes();
+                            if (bytes.get_size() > 0 && bytes.get_size() <= MAX_CLIPBOARD_PAYLOAD_BYTES)
+                                original.content = { mimeType: nonText, data: bytes };
+                        }
                     } catch (e) {
                         console.error(`[openwispr-gnome-extension] Failed to capture non-text clipboard: ${e}`);
                     }
                     callback(original);
-                });
+                    }
+                );
             } catch (e) {
                 console.error(`[openwispr-gnome-extension] Failed to inspect clipboard: ${e}`);
                 callback(original);
