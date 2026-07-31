@@ -898,25 +898,26 @@ class OpenWisprController {
             const original = { text: originalText, content: null };
             try {
                 const selection = global.display.get_selection();
-                const mimes = selection?.get_mimetypes?.(Meta.SelectionType.CLIPBOARD) ?? [];
-                const nonText = mimes.includes('image/png')
-                    ? 'image/png'
-                    : mimes.find(mime => mime.startsWith('image/') || mime === 'text/uri-list');
+                const mimes = selection?.get_mimetypes?.(Meta.SelectionType.SELECTION_CLIPBOARD) ?? [];
+                const preferredMimes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'text/uri-list'];
+                const nonText = preferredMimes.find(mime => mimes.includes(mime))
+                    ?? mimes.find(mime => mime.startsWith('image/'));
                 if (!nonText) {
                     callback(original);
                     return;
                 }
                 const output = Gio.MemoryOutputStream.new_resizable();
                 selection.transfer_async(
-                    Meta.SelectionType.CLIPBOARD,
+                    Meta.SelectionType.SELECTION_CLIPBOARD,
                     nonText,
                     MAX_CLIPBOARD_PAYLOAD_BYTES,
                     output,
                     null,
                     (_selection, result) => {
                     try {
-                        if (selection.transfer_finish(result)) {
-                            output.close(null);
+                        const transferred = selection.transfer_finish(result);
+                        output.close(null);
+                        if (transferred) {
                             const bytes = output.steal_as_bytes();
                             if (bytes.get_size() > 0 && bytes.get_size() <= MAX_CLIPBOARD_PAYLOAD_BYTES)
                                 original.content = { mimeType: nonText, data: bytes };
