@@ -32,4 +32,8 @@ jobs:
 
       - name: Build and test
         working-directory: apps/android-keyboard
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+          VERSION_NAME: ci-${{ github.run_number }}
+          BRANCH_NAME: develop
         run: ./gradlew assembleUnstableDebug test
