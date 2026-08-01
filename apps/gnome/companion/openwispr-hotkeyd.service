@@ -1,0 +1,49 @@
+[Unit]
+Description=openwispr hold-to-talk daemon
+PartOf=graphical-session.target
+After=graphical-session.target openwispr-engine.service
+Requires=openwispr-engine.service
+StartLimitIntervalSec=120
+StartLimitBurst=10
+
+[Service]
+Type=simple
+Environment="PATH=/usr/local/bin:/usr/bin:/bin:%h/.local/bin"
+Environment=OPENWISPR_TRIGGER=<Super>z
+Environment=OPENWISPR_EVDEV_KEY=z
+ExecStartPre=/bin/sh -c 'for i in 1 2 3 4 5; do gdbus wait --session --dest org.freedesktop.portal.Desktop 2>/dev/null && exit 0; sleep 1; done; exit 0'
+ExecStart=%h/.local/bin/openwispr daemon --backend auto --trigger ${OPENWISPR_TRIGGER} --evdev-key ${OPENWISPR_EVDEV_KEY}
+WorkingDirectory=%h
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10s
+
+# --- Hardening ---
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadWritePaths=%h/.config %h/.cache
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+CapabilityBoundingSet=
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectClock=true
+ProtectHostname=true
+ProtectControlGroups=true
+ProtectProc=invisible
+RemoveIPC=true
+UMask=077
+# evdev needs /dev/input; cannot use PrivateDevices=true here.
+PrivateDevices=false
+
+[Install]
+WantedBy=graphical-session.target

@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=OpenWispr Companion
+Comment=OpenWispr portal companion registration entry
+# Bare name + TryExec so gtk-launch / GNOME GlobalShortcuts can detect absence.
+# The desktop spec does NOT expand %h (that's systemd); this user-level NoDisplay
+# entry only exists to anchor the app ID for the portal companion.
+Exec=openwispr daemon --backend auto
+TryExec=openwispr
+Icon=io.github.tnfssc.openwispr
+Terminal=false
+NoDisplay=true
+Categories=AudioVideo;Audio;Utility;
