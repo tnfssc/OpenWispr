@@ -26,11 +26,11 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         });
         page.add(companionGroup);
 
-        const releasesUrl = 'https://github.com/tnfssc/openwispr-gnome-extension/releases/latest';
+        const releasesUrl = 'https://github.com/tnfssc/OpenWispr/releases/tag/gnome-latest';
         const installCommand = [
             'ARCH="$(uname -m)"',
             'case "$ARCH" in x86_64) BIN=openwispr-linux-amd64 ;; aarch64|arm64) BIN=openwispr-linux-arm64 ;; *) echo "Unsupported arch: $ARCH"; exit 1 ;; esac',
-            'REPO="https://github.com/tnfssc/openwispr-gnome-extension/releases/latest/download"',
+            'REPO="https://github.com/tnfssc/OpenWispr/releases/download/gnome-latest"',
             'TMP="$(mktemp -d)"',
             'mkdir -p ~/.local/bin ~/.config/systemd/user ~/.local/share/applications ~/.local/share/icons/hicolor/256x256/apps',
             'curl -fsSL "$REPO/${BIN}.tar.gz" -o "$TMP/${BIN}.tar.gz"',

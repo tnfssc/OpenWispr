@@ -1,0 +1,33 @@
+name: Android Keyboard CI
+
+on:
+  push:
+    paths:
+      - "apps/android-keyboard/**"
+      - ".gitmodules"
+      - ".github/workflows/ci-android-keyboard.yml"
+  pull_request:
+    paths:
+      - "apps/android-keyboard/**"
+      - ".gitmodules"
+      - ".github/workflows/ci-android-keyboard.yml"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build and test
+        working-directory: apps/android-keyboard
+        run: ./gradlew assembleUnstableDebug test

@@ -1,8 +1,14 @@
-name: CI
+name: macOS CI
 
 on:
   push:
+    paths:
+      - "apps/macos/**"
+      - ".github/workflows/ci.yml"
   pull_request:
+    paths:
+      - "apps/macos/**"
+      - ".github/workflows/ci.yml"
 
 jobs:
   verify:
@@ -16,4 +22,5 @@ jobs:
         run: swift --version
 
       - name: Run lint, build, and tests
+        working-directory: apps/macos
         run: ./scripts/check.sh

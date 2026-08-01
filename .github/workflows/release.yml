@@ -1,9 +1,9 @@
-name: Release
+name: Release macOS
 
 on:
   push:
     tags:
-      - "*"
+      - "macos-v*"
 
 permissions:
   contents: write
@@ -20,6 +20,7 @@ jobs:
         run: swift --version
 
       - name: Build release package
+        working-directory: apps/macos
         run: ./scripts/package-release.sh "${{ github.ref_name }}"
 
       - name: Upload workflow artifact
@@ -27,8 +28,8 @@ jobs:
         with:
           name: OpenWispr-${{ github.ref_name }}
           path: |
-            dist/*.dmg
-            dist/*.dmg.sha256
+            apps/macos/dist/*.dmg
+            apps/macos/dist/*.dmg.sha256
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
@@ -36,5 +37,5 @@ jobs:
           tag_name: ${{ github.ref_name }}
           generate_release_notes: true
           files: |
-            dist/*.dmg
-            dist/*.dmg.sha256
+            apps/macos/dist/*.dmg
+            apps/macos/dist/*.dmg.sha256

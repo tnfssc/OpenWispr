@@ -16,7 +16,8 @@ ICONSET_DIR="$DIST_DIR/.AppIcon.iconset"
 ICON_FILE_NAME="AppIcon.icns"
 CHECKSUM_PATH="$DMG_PATH.sha256"
 
-BUNDLE_VERSION="${TAG#v}"
+BUNDLE_VERSION="${TAG#macos-}"
+BUNDLE_VERSION="${BUNDLE_VERSION#v}"
 if [[ ! "$BUNDLE_VERSION" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
   BUNDLE_VERSION="0.0.0"
 fi

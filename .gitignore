@@ -4,3 +4,24 @@ DerivedData/
 *.xcodeproj/
 *.xcworkspace/
 .DS_Store
+
+# GNOME extension
+*.bin
+*.env*
+*.log
+*.wav
+*.wav.txt
+gschemas.compiled
+out/
+
+# Android keyboard
+.externalNativeBuild/
+.gradle/
+.idea/
+LatinIME.iml
+local.properties
+crashreporting.properties
+keystore.properties
+key.jks
+.cxx
+java/res/raw/mozc.data

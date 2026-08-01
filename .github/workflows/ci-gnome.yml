@@ -1,0 +1,27 @@
+name: GNOME CI
+
+on:
+  push:
+    paths:
+      - "apps/gnome/**"
+      - ".github/workflows/ci-gnome.yml"
+  pull_request:
+    paths:
+      - "apps/gnome/**"
+      - ".github/workflows/ci-gnome.yml"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/gnome/go.mod
+          cache-dependency-path: apps/gnome/go.sum
+
+      - name: Test companion
+        working-directory: apps/gnome
+        run: go test ./...

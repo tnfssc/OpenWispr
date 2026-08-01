@@ -109,8 +109,8 @@ Use this path if you want to skip local Whisper binaries and models.
 
 1.  **Clone the Repository**
     ```bash
-    git clone https://github.com/tnfssc/openwispr-gnome-extension.git
-    cd openwispr-gnome-extension
+    git clone https://github.com/tnfssc/OpenWispr.git
+    cd OpenWispr/apps/gnome
     ```
 
 2.  **Install the Extension**
@@ -158,7 +158,7 @@ case "$ARCH" in
   *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
 esac
 
-REPO="https://github.com/tnfssc/openwispr-gnome-extension/releases/latest/download"
+REPO="https://github.com/tnfssc/OpenWispr/releases/download/gnome-latest"
 TMP="$(mktemp -d)"
 
 mkdir -p ~/.local/bin ~/.config/systemd/user ~/.local/share/applications ~/.local/share/icons/hicolor/256x256/apps

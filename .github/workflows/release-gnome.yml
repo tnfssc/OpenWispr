@@ -1,0 +1,79 @@
+name: Release GNOME
+
+on:
+  push:
+    tags:
+      - "gnome-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/gnome/go.mod
+          cache-dependency-path: apps/gnome/go.sum
+
+      - name: Install packaging tools
+        run: sudo apt-get update && sudo apt-get install -y jq zip rsync
+
+      - name: Build extension and companion assets
+        id: package
+        working-directory: apps/gnome
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#gnome-v}"
+          EXT_DIR="extension"
+          UUID="$(jq -r '.uuid' "$EXT_DIR/metadata.json")"
+          BUILD_DIR="$(mktemp -d)"
+          STAGE_DIR="$BUILD_DIR/$UUID"
+          ZIP_PATH="$BUILD_DIR/$UUID-$VERSION.zip"
+          DIST_DIR="$RUNNER_TEMP/openwispr-gnome-dist"
+
+          mkdir -p "$STAGE_DIR" "$DIST_DIR"
+          rsync -a --exclude 'models/' --exclude 'schemas/gschemas.compiled' "$EXT_DIR/" "$STAGE_DIR/"
+          (cd "$STAGE_DIR" && zip -r "$ZIP_PATH" .)
+
+          for ARCH in amd64 arm64; do
+            BIN_NAME="openwispr-linux-$ARCH"
+            GOOS=linux GOARCH="$ARCH" CGO_ENABLED=0 go build -trimpath -o "$DIST_DIR/$BIN_NAME" ./cmd/openwispr
+            tar -C "$DIST_DIR" -czf "$DIST_DIR/$BIN_NAME.tar.gz" "$BIN_NAME"
+          done
+          (cd "$DIST_DIR" && sha256sum openwispr-linux-amd64.tar.gz openwispr-linux-arm64.tar.gz > "openwispr-$VERSION-checksums.txt")
+
+          echo "zip_path=$ZIP_PATH" >> "$GITHUB_OUTPUT"
+          echo "dist_dir=$DIST_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Publish versioned release and stable GNOME assets
+        working-directory: apps/gnome
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          ZIP_PATH: ${{ steps.package.outputs.zip_path }}
+          DIST_DIR: ${{ steps.package.outputs.dist_dir }}
+        run: |
+          set -euo pipefail
+          ASSETS=(
+            "$ZIP_PATH"
+            "$DIST_DIR"/openwispr-linux-amd64.tar.gz
+            "$DIST_DIR"/openwispr-linux-arm64.tar.gz
+            "$DIST_DIR"/openwispr-*-checksums.txt
+            companion/openwispr-engine.service
+            companion/openwispr-hotkeyd.service
+            companion/io.github.tnfssc.openwispr.desktop
+            openwispr.png
+          )
+          gh release create "$RELEASE_TAG" --generate-notes "${ASSETS[@]}" || gh release upload "$RELEASE_TAG" --clobber "${ASSETS[@]}"
+          if gh release view gnome-latest >/dev/null 2>&1; then
+            gh release upload gnome-latest --clobber "${ASSETS[@]}"
+          else
+            gh release create gnome-latest --title "Latest GNOME companion assets" --notes "Stable download endpoint for the latest GNOME companion assets." --latest=false "${ASSETS[@]}"
+          fi

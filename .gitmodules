@@ -1,0 +1,21 @@
+[submodule "android-keyboard-libs"]
+	path = apps/android-keyboard/libs
+	url = https://gitlab.futo.org/keyboard/android-libs.git
+[submodule "android-keyboard-voiceinput-models"]
+	path = apps/android-keyboard/voiceinput-shared/src/main/ml
+	url = https://gitlab.futo.org/keyboard/voice-input-models.git
+[submodule "android-keyboard-layouts"]
+	path = apps/android-keyboard/java/assets/layouts
+	url = https://github.com/futo-org/futo-keyboard-layouts.git
+[submodule "android-keyboard-translations"]
+	path = apps/android-keyboard/translations
+	url = https://gitlab.futo.org/keyboard/keyboard-translations-public.git
+[submodule "android-keyboard-themes"]
+	path = apps/android-keyboard/java/assets/themes
+	url = https://gitlab.futo.org/keyboard/seasonal-themes.git
+[submodule "android-keyboard-large-resources"]
+	path = apps/android-keyboard/java/res-large
+	url = https://gitlab.futo.org/keyboard/keyboard-large-resources.git
+[submodule "android-keyboard-futo-swipe"]
+	path = apps/android-keyboard/java/assets/futo-swipe
+	url = https://huggingface.co/futo-org/futo-swipe
