@@ -1,35 +1,34 @@
-# FUTO Keyboard
+# OpenWispr Keyboard
 
-> **Modified fork notice:** This non-commercial fork is modified by OpenWispr.
+> **Modified FUTO Keyboard fork:** This non-commercial fork is modified by OpenWispr.
 > Voice recordings are sent to the provider selected by the user instead of
 > using FUTO's offline speech model. Keyboard typing, suggestions, and swipe
 > processing remain local. This project is not an official FUTO release.
 
-The goal is to make a good modern keyboard that stays offline and doesn't spy on you. This keyboard is a fork of [LatinIME, The Android Open-Source Keyboard](https://android.googlesource.com/platform/packages/inputmethods/LatinIME), with significant changes made to it.
+OpenWispr Keyboard is based on [FUTO Keyboard](https://github.com/futo-org/android-keyboard), itself a fork of [LatinIME, the Android Open-Source Keyboard](https://android.googlesource.com/platform/packages/inputmethods/LatinIME). Its OpenWispr voice-input code sends recordings only to the provider selected by the user.
 
-Check out the [FUTO Keyboard website](https://keyboard.futo.tech/) for downloads and more information.
+The canonical source, releases, issue tracking, and contribution point for this modified fork is the [OpenWispr monorepo](https://github.com/tnfssc/OpenWispr).
 
 The code is licensed under the [FUTO Source First License 1.1](LICENSE.md).
 
 ## Issue tracking and contributing
 
-Please check the GitHub repository to report issues: [https://github.com/futo-org/android-keyboard/](https://github.com/futo-org/android-keyboard/)
+Report issues and open pull requests in the [OpenWispr monorepo](https://github.com/tnfssc/OpenWispr). Issues specific to OpenWispr voice input, branding, releases, or this fork belong here.
 
-The source code is hosted on our [internal GitLab](https://gitlab.futo.org/keyboard/latinime) and mirrored to [GitHub](https://github.com/futo-org/android-keyboard/). As registration is closed on our internal GitLab, we use GitHub instead for issues and pull requests.
+For a problem in unmodified upstream FUTO Keyboard behavior, consult [FUTO Keyboard's upstream repository](https://github.com/futo-org/android-keyboard). This repository is not an official FUTO support channel.
 
-Due to custom license, pull requests to this repository require signing a [CLA](https://cla.futo.org/) which you can do after opening a PR. Contributions to the [layouts repo](https://github.com/futo-org/futo-keyboard-layouts) don't require CLA as they're Apache-2.0
-
-If you want to help translate the app, please do so via our Pontoon instance: https://i18n-keyboard.futo.org/
+Contributions remain subject to the [FUTO Source First License 1.1-kb](LICENSE.md) and all applicable upstream notices.
 
 ## Layouts
 
-If you want to contribute layouts, check out the [layouts repo](https://github.com/futo-org/futo-keyboard-layouts).
+The keyboard retains FUTO's layout submodule. See [the upstream layouts repository](https://github.com/futo-org/futo-keyboard-layouts) for its contribution policy.
 
 ## Building
 
 When cloning the repository, you must perform a recursive clone to fetch all dependencies:
 ```
-git clone --recursive https://gitlab.futo.org/keyboard/latinime.git
+git clone --recurse-submodules https://github.com/tnfssc/OpenWispr.git
+cd OpenWispr/apps/android-keyboard
 ```
 
 If you forgot to specify recursive clone, use this to fetch submodules:
