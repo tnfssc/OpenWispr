@@ -233,28 +233,37 @@ private fun ProviderPicker(
     }
 }
 
-@Composable
-private fun ProviderOnboarding(provider: OpenWisprProvider) {
-    val context = LocalContext.current
-    val (message, action, url) = when (provider) {
-        OpenWisprProvider.GROQ -> Triple(
+data class ProviderOnboardingDetails(
+    val message: String,
+    val action: String,
+    val url: String,
+)
+
+fun providerOnboardingDetails(provider: OpenWisprProvider): ProviderOnboardingDetails =
+    when (provider) {
+        OpenWisprProvider.GROQ -> ProviderOnboardingDetails(
             "Recommended: Groq is the fastest free default. Create a key, paste it below, and save.",
             "Create Groq API key",
             "https://console.groq.com/keys",
         )
-        OpenWisprProvider.OPEN_ROUTER -> Triple(
+        OpenWisprProvider.OPEN_ROUTER -> ProviderOnboardingDetails(
             "OpenRouter uses NVIDIA Parakeet for transcription and Qwen 3.6 27B for cleanup by default.",
             "Create OpenRouter API key",
             "https://openrouter.ai/keys",
         )
     }
 
+@Composable
+private fun ProviderOnboarding(provider: OpenWisprProvider) {
+    val context = LocalContext.current
+    val onboarding = providerOnboardingDetails(provider)
+
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(message, style = MaterialTheme.typography.bodySmall)
+        Text(onboarding.message, style = MaterialTheme.typography.bodySmall)
         Button(onClick = {
-            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(onboarding.url)))
         }) {
-            Text(action)
+            Text(onboarding.action)
         }
     }
 }

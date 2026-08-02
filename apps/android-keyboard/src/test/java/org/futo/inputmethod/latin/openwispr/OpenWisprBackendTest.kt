@@ -3,6 +3,7 @@ package org.futo.inputmethod.latin.openwispr
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.futo.inputmethod.latin.uix.settings.pages.providerOnboardingDetails
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -52,6 +53,20 @@ class OpenWisprBackendTest {
 
         val custom = OpenWisprConfig.migrateLegacyDefaults("custom-stt", "custom-llm", "custom prompt")
         assertEquals(Triple("custom-stt", "custom-llm", "custom prompt"), custom)
+    }
+
+    @Test
+    fun `provider onboarding points to the correct key pages`() {
+        val groq = providerOnboardingDetails(OpenWisprProvider.GROQ)
+        assertEquals("https://console.groq.com/keys", groq.url)
+        assertEquals("Create Groq API key", groq.action)
+        assertTrue(groq.message.contains("fastest free default"))
+
+        val openRouter = providerOnboardingDetails(OpenWisprProvider.OPEN_ROUTER)
+        assertEquals("https://openrouter.ai/keys", openRouter.url)
+        assertEquals("Create OpenRouter API key", openRouter.action)
+        assertTrue(openRouter.message.contains("NVIDIA Parakeet"))
+        assertTrue(openRouter.message.contains("Qwen 3.6 27B"))
     }
 
     @Test
