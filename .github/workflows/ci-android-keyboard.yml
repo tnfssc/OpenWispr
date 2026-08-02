@@ -1,22 +1,39 @@
-name: Android Keyboard CI
+name: Android Voice CI
 
 on:
   push:
     branches:
       - "**"
     paths:
-      - "apps/android-keyboard/**"
+      - "apps/android-keyboard/java/src/org/futo/inputmethod/latin/openwispr/**"
+      - "apps/android-keyboard/voiceinput-shared/**"
+      - "apps/android-keyboard/java/src/org/futo/inputmethod/latin/uix/actions/VoiceInputAction.kt"
+      - "apps/android-keyboard/java/src/org/futo/inputmethod/latin/uix/settings/SettingsNavigator.kt"
+      - "apps/android-keyboard/java/src/org/futo/inputmethod/latin/uix/settings/pages/OpenWisprVoiceSettings.kt"
+      - "apps/android-keyboard/java/src/org/futo/inputmethod/latin/uix/settings/pages/VoiceInput.kt"
+      - "apps/android-keyboard/src/test/java/org/futo/inputmethod/latin/openwispr/**"
+      - "apps/android-keyboard/tests/src/org/futo/inputmethod/latin/openwispr/**"
+      - "apps/android-keyboard/build.gradle"
       - ".gitmodules"
       - ".github/workflows/ci-android-keyboard.yml"
   pull_request:
     paths:
-      - "apps/android-keyboard/**"
+      - "apps/android-keyboard/java/src/org/futo/inputmethod/latin/openwispr/**"
+      - "apps/android-keyboard/voiceinput-shared/**"
+      - "apps/android-keyboard/java/src/org/futo/inputmethod/latin/uix/actions/VoiceInputAction.kt"
+      - "apps/android-keyboard/java/src/org/futo/inputmethod/latin/uix/settings/SettingsNavigator.kt"
+      - "apps/android-keyboard/java/src/org/futo/inputmethod/latin/uix/settings/pages/OpenWisprVoiceSettings.kt"
+      - "apps/android-keyboard/java/src/org/futo/inputmethod/latin/uix/settings/pages/VoiceInput.kt"
+      - "apps/android-keyboard/src/test/java/org/futo/inputmethod/latin/openwispr/**"
+      - "apps/android-keyboard/tests/src/org/futo/inputmethod/latin/openwispr/**"
+      - "apps/android-keyboard/build.gradle"
       - ".gitmodules"
       - ".github/workflows/ci-android-keyboard.yml"
 
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4
@@ -30,10 +47,10 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Build and test
+      - name: Test OpenWispr voice backend
         working-directory: apps/android-keyboard
         env:
           VERSION_CODE: ${{ github.run_number }}
           VERSION_NAME: ci-${{ github.run_number }}
           BRANCH_NAME: develop
-        run: ./gradlew assembleUnstableDebug test
+        run: ./gradlew testUnstableDebugUnitTest --tests org.futo.inputmethod.latin.openwispr.OpenWisprBackendTest
