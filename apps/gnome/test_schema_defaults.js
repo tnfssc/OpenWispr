@@ -15,9 +15,9 @@ const DISABLED = false;
 const ALLOWED_PASTE_METHODS = ['ctrl-v', 'ctrl-shift-v', 'shift-insert', 'clipboard-only'];
 
 // Exact key count asserted by settings.list_keys(). The schema XML defines
-// 26 keys; update this constant alongside the .xml when keys are added or
+// 32 keys; update this constant alongside the .xml when keys are added or
 // removed. A loose >= assertion would silently hide a missing key.
-const EXPECTED_KEY_COUNT = 26;
+const EXPECTED_KEY_COUNT = 32;
 
 // Load metadata.json
 const metadataPath = './extension/metadata.json';
@@ -124,22 +124,28 @@ try {
     assertEqual(defaultValue(schema, 'silence-threshold'), '-35dB', "'silence-threshold' default");
     assertEqual(defaultValue(schema, 'silence-duration'), 0.25, "'silence-duration' default");
 
-    assertEqual(defaultValue(schema, 'stt-provider'), 'local', "'stt-provider' default");
+    assertEqual(defaultValue(schema, 'stt-provider'), 'groq', "'stt-provider' default");
     assertEqual(defaultValue(schema, 'stt-openai-endpoint'), 'https://api.openai.com/v1/audio/transcriptions', "'stt-openai-endpoint' default");
     assertEqual(defaultValue(schema, 'stt-openai-model'), 'whisper-1', "'stt-openai-model' default");
     assertEqual(defaultValue(schema, 'stt-openai-api-key'), '', "'stt-openai-api-key' default");
     assertEqual(defaultValue(schema, 'stt-groq-endpoint'), 'https://api.groq.com/openai/v1/audio/transcriptions', "'stt-groq-endpoint' default");
     assertEqual(defaultValue(schema, 'stt-groq-model'), 'whisper-large-v3-turbo', "'stt-groq-model' default");
     assertEqual(defaultValue(schema, 'stt-groq-api-key'), '', "'stt-groq-api-key' default");
+    assertEqual(defaultValue(schema, 'stt-openrouter-endpoint'), 'https://openrouter.ai/api/v1/chat/completions', "'stt-openrouter-endpoint' default");
+    assertEqual(defaultValue(schema, 'stt-openrouter-model'), 'nvidia/parakeet-tdt-0.6b-v3', "'stt-openrouter-model' default");
+    assertEqual(defaultValue(schema, 'stt-openrouter-api-key'), '', "'stt-openrouter-api-key' default");
 
     assertEqual(defaultValue(schema, 'llm-filter-enabled'), DISABLED, "'llm-filter-enabled' default");
-    assertEqual(defaultValue(schema, 'llm-provider'), 'openai', "'llm-provider' default");
+    assertEqual(defaultValue(schema, 'llm-provider'), 'groq', "'llm-provider' default");
     assertEqual(defaultValue(schema, 'llm-openai-endpoint'), 'https://api.openai.com/v1/chat/completions', "'llm-openai-endpoint' default");
     assertEqual(defaultValue(schema, 'llm-openai-model'), 'gpt-4o-mini', "'llm-openai-model' default");
     assertEqual(defaultValue(schema, 'llm-openai-api-key'), '', "'llm-openai-api-key' default");
     assertEqual(defaultValue(schema, 'llm-groq-endpoint'), 'https://api.groq.com/openai/v1/chat/completions', "'llm-groq-endpoint' default");
-    assertEqual(defaultValue(schema, 'llm-groq-model'), 'llama-3.1-8b-instant', "'llm-groq-model' default");
+    assertEqual(defaultValue(schema, 'llm-groq-model'), 'qwen/qwen3.6-27b', "'llm-groq-model' default");
     assertEqual(defaultValue(schema, 'llm-groq-api-key'), '', "'llm-groq-api-key' default");
+    assertEqual(defaultValue(schema, 'llm-openrouter-endpoint'), 'https://openrouter.ai/api/v1/chat/completions', "'llm-openrouter-endpoint' default");
+    assertEqual(defaultValue(schema, 'llm-openrouter-model'), 'qwen/qwen3.6-27b', "'llm-openrouter-model' default");
+    assertEqual(defaultValue(schema, 'llm-openrouter-api-key'), '', "'llm-openrouter-api-key' default");
 
     const prompt = defaultValue(schema, 'llm-cleanup-prompt');
     assertTrue(prompt.length > 20, "'llm-cleanup-prompt' default is non-empty");

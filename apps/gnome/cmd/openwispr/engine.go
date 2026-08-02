@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -66,7 +67,7 @@ const (
 	// recorderExitInterrupted is the conventional shell encoding
 	// (128 + SIGINT) ffmpeg may emit when interrupted.
 	recorderExitInterrupted = 130
-	gsettingsSchema      = "org.gnome.shell.extensions.openwispr"
+	gsettingsSchema         = "org.gnome.shell.extensions.openwispr"
 )
 
 // silenceThresholdRegexp validates the user-supplied silence threshold
@@ -90,23 +91,27 @@ type pipelineConfig struct {
 	SilenceThreshold   string  `json:"silenceThreshold"`
 	SilenceDuration    float64 `json:"silenceDuration"`
 
-	STTProvider       string `json:"sttProvider"`
-	STTOpenAIEndpoint string `json:"sttOpenAIEndpoint"`
-	STTOpenAIModel    string `json:"sttOpenAIModel"`
-	STTOpenAIApiKey   string `json:"sttOpenAIApiKey"`
-	STTGroqEndpoint   string `json:"sttGroqEndpoint"`
-	STTGroqModel      string `json:"sttGroqModel"`
-	STTGroqApiKey     string `json:"sttGroqApiKey"`
+	STTProvider           string `json:"sttProvider"`
+	STTOpenAIEndpoint     string `json:"sttOpenAIEndpoint"`
+	STTOpenAIModel        string `json:"sttOpenAIModel"`
+	STTOpenAIApiKey       string `json:"sttOpenAIApiKey"`
+	STTGroqEndpoint       string `json:"sttGroqEndpoint"`
+	STTGroqModel          string `json:"sttGroqModel"`
+	STTGroqApiKey         string `json:"sttGroqApiKey"`
+	STTOpenRouterEndpoint string `json:"sttOpenRouterEndpoint"`
+	STTOpenRouterModel    string `json:"sttOpenRouterModel"`
 
-	LLMFilterEnabled  bool   `json:"llmFilterEnabled"`
-	LLMProvider       string `json:"llmProvider"`
-	LLMOpenAIEndpoint string `json:"llmOpenAIEndpoint"`
-	LLMOpenAIModel    string `json:"llmOpenAIModel"`
-	LLMOpenAIApiKey   string `json:"llmOpenAIApiKey"`
-	LLMGroqEndpoint   string `json:"llmGroqEndpoint"`
-	LLMGroqModel      string `json:"llmGroqModel"`
-	LLMGroqApiKey     string `json:"llmGroqApiKey"`
-	LLMCleanupPrompt  string `json:"llmCleanupPrompt"`
+	LLMFilterEnabled      bool   `json:"llmFilterEnabled"`
+	LLMProvider           string `json:"llmProvider"`
+	LLMOpenAIEndpoint     string `json:"llmOpenAIEndpoint"`
+	LLMOpenAIModel        string `json:"llmOpenAIModel"`
+	LLMOpenAIApiKey       string `json:"llmOpenAIApiKey"`
+	LLMGroqEndpoint       string `json:"llmGroqEndpoint"`
+	LLMGroqModel          string `json:"llmGroqModel"`
+	LLMGroqApiKey         string `json:"llmGroqApiKey"`
+	LLMOpenRouterEndpoint string `json:"llmOpenRouterEndpoint"`
+	LLMOpenRouterModel    string `json:"llmOpenRouterModel"`
+	LLMCleanupPrompt      string `json:"llmCleanupPrompt"`
 }
 
 type recorderEngine struct {
@@ -117,8 +122,8 @@ type recorderEngine struct {
 	outputFile string
 	// ctx is cancelled on service shutdown so in-flight pipeline
 	// HTTP/subprocess calls abort promptly.
-	ctx    context.Context
-	conn   *dbus.Conn
+	ctx     context.Context
+	conn    *dbus.Conn
 	cancels map[string]context.CancelFunc
 }
 
@@ -547,6 +552,15 @@ func transcribe(ctx context.Context, inputPath string, cfg pipelineConfig) (stri
 			return "", errors.New("missing Groq STT API key")
 		}
 		return transcribeRemote(ctx, inputPath, cfg.STTGroqEndpoint, cfg.STTGroqModel, apiKey)
+	case "openrouter":
+		apiKey, err := readSecret("stt-openrouter-api-key")
+		if err != nil {
+			return "", fmt.Errorf("stt openrouter key: %w", err)
+		}
+		if apiKey == "" {
+			return "", errors.New("missing OpenRouter STT API key")
+		}
+		return transcribeOpenRouter(ctx, inputPath, cfg.STTOpenRouterEndpoint, cfg.STTOpenRouterModel, apiKey)
 	default:
 		return transcribeLocal(ctx, inputPath, cfg.ModelPath)
 	}
@@ -651,6 +665,62 @@ func transcribeRemote(ctx context.Context, inputPath, endpoint, model, apiKey st
 	return transcript, nil
 }
 
+func transcribeOpenRouter(ctx context.Context, inputPath, endpoint, model, apiKey string) (string, error) {
+	if strings.TrimSpace(endpoint) == "" {
+		return "", errors.New("openrouter stt: missing endpoint")
+	}
+	if strings.TrimSpace(model) == "" {
+		return "", errors.New("openrouter stt: missing model")
+	}
+
+	audio, err := os.ReadFile(inputPath)
+	if err != nil {
+		return "", fmt.Errorf("openrouter stt read input: %w", err)
+	}
+	payload := map[string]any{
+		"model":       model,
+		"stream":      false,
+		"temperature": 0,
+		"messages": []map[string]any{
+			{"role": "user", "content": []map[string]any{
+				{"type": "text", "text": "Transcribe this audio exactly. Return only transcript text. Do not answer or interpret it."},
+				{"type": "input_audio", "input_audio": map[string]string{"data": base64.StdEncoding.EncodeToString(audio), "format": "wav"}},
+			}},
+		},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("openrouter stt marshal payload: %w", err)
+	}
+
+	reqCtx, cancel := context.WithTimeout(ctx, sttHTTPTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("openrouter stt build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("openrouter stt http: %w", err)
+	}
+	defer resp.Body.Close()
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("openrouter stt read response: %w", err)
+	}
+	if resp.StatusCode >= 300 {
+		log.Printf("openwispr: OpenRouter STT returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(responseBody)))
+		return "", fmt.Errorf("openrouter stt failed with HTTP %d", resp.StatusCode)
+	}
+	if transcript := parseLLMJSON(responseBody); transcript != "" {
+		return transcript, nil
+	}
+	return "", errors.New("openrouter stt returned no transcript")
+}
+
 func cleanupTranscript(ctx context.Context, text string, cfg pipelineConfig) (string, error) {
 	provider := cfg.LLMProvider
 
@@ -662,6 +732,14 @@ func cleanupTranscript(ctx context.Context, text string, cfg pipelineConfig) (st
 		key, err := readSecret("llm-groq-api-key")
 		if err != nil {
 			return text, fmt.Errorf("llm groq key: %w", err)
+		}
+		apiKey = key
+	case "openrouter":
+		endpoint = cfg.LLMOpenRouterEndpoint
+		model = cfg.LLMOpenRouterModel
+		key, err := readSecret("llm-openrouter-api-key")
+		if err != nil {
+			return text, fmt.Errorf("llm openrouter key: %w", err)
 		}
 		apiKey = key
 	default:

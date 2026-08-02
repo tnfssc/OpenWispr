@@ -198,10 +198,24 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         const sttGroup = new Adw.PreferencesGroup({ title: _('Speech to Text') });
         page.add(sttGroup);
 
+        this._addLinkRow(
+            sttGroup,
+            _('Create Groq API Key (Recommended)'),
+            _('Groq is the fastest free default. Create a key, paste it below, and record.'),
+            'https://console.groq.com/keys'
+        );
+        this._addLinkRow(
+            sttGroup,
+            _('Create OpenRouter API Key'),
+            _('Optional alternative using NVIDIA Parakeet for transcription.'),
+            'https://openrouter.ai/keys'
+        );
+
         const sttProviderOptions = [
             { id: 'local', label: _('Local whisper-cli') },
             { id: 'openai', label: _('OpenAI Whisper Endpoint') },
             { id: 'groq', label: _('Groq Endpoint') },
+            { id: 'openrouter', label: _('OpenRouter NVIDIA Parakeet') },
         ];
         const sttProviderModel = Gtk.StringList.new(sttProviderOptions.map(option => option.label));
         const sttProviderRow = new Adw.ComboRow({
@@ -222,10 +236,14 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         const sttGroqEndpointRow = this._addEntryRow(sttGroup, settings, 'stt-groq-endpoint', _('Groq STT Endpoint'));
         const sttGroqModelRow = this._addEntryRow(sttGroup, settings, 'stt-groq-model', _('Groq STT Model'));
         const sttGroqApiKeyRow = this._addSecretRow(sttGroup, settings, 'stt-groq-api-key', _('Groq STT API Key'));
+        const sttOpenRouterEndpointRow = this._addEntryRow(sttGroup, settings, 'stt-openrouter-endpoint', _('OpenRouter STT Endpoint'));
+        const sttOpenRouterModelRow = this._addEntryRow(sttGroup, settings, 'stt-openrouter-model', _('OpenRouter STT Model'));
+        const sttOpenRouterApiKeyRow = this._addSecretRow(sttGroup, settings, 'stt-openrouter-api-key', _('OpenRouter STT API Key'));
 
         const updateSttProviderVisibility = providerId => {
             const showOpenAi = providerId === 'openai';
             const showGroq = providerId === 'groq';
+            const showOpenRouter = providerId === 'openrouter';
 
             sttOpenAiEndpointRow.set_visible(showOpenAi);
             sttOpenAiModelRow.set_visible(showOpenAi);
@@ -233,6 +251,9 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
             sttGroqEndpointRow.set_visible(showGroq);
             sttGroqModelRow.set_visible(showGroq);
             sttGroqApiKeyRow.set_visible(showGroq);
+            sttOpenRouterEndpointRow.set_visible(showOpenRouter);
+            sttOpenRouterModelRow.set_visible(showOpenRouter);
+            sttOpenRouterApiKeyRow.set_visible(showOpenRouter);
         };
 
         updateSttProviderVisibility(sttProviderOptions[sttProviderRow.selected]?.id || sttProviderOptions[0].id);
@@ -245,6 +266,19 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         const llmGroup = new Adw.PreferencesGroup({ title: _('LLM Cleanup') });
         page.add(llmGroup);
 
+        this._addLinkRow(
+            llmGroup,
+            _('Create Groq API Key (Recommended)'),
+            _('Use the same Groq key for the default Qwen cleanup model.'),
+            'https://console.groq.com/keys'
+        );
+        this._addLinkRow(
+            llmGroup,
+            _('Create OpenRouter API Key'),
+            _('Optional alternative using Qwen 3.6 27B for cleanup.'),
+            'https://openrouter.ai/keys'
+        );
+
         const llmCleanupRow = new Adw.SwitchRow({
             title: _('Enable LLM Transcript Cleanup'),
             subtitle: _('Clean STT output after transcription.'),
@@ -256,6 +290,7 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         const llmProviderOptions = [
             { id: 'openai', label: _('OpenAI LLM Endpoint') },
             { id: 'groq', label: _('Groq LLM Endpoint') },
+            { id: 'openrouter', label: _('OpenRouter Qwen') },
         ];
         const llmProviderModel = Gtk.StringList.new(llmProviderOptions.map(option => option.label));
         const llmProviderRow = new Adw.ComboRow({
@@ -276,10 +311,14 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         const llmGroqEndpointRow = this._addEntryRow(llmGroup, settings, 'llm-groq-endpoint', _('Groq LLM Endpoint'));
         const llmGroqModelRow = this._addEntryRow(llmGroup, settings, 'llm-groq-model', _('Groq LLM Model'));
         const llmGroqApiKeyRow = this._addSecretRow(llmGroup, settings, 'llm-groq-api-key', _('Groq LLM API Key'));
+        const llmOpenRouterEndpointRow = this._addEntryRow(llmGroup, settings, 'llm-openrouter-endpoint', _('OpenRouter LLM Endpoint'));
+        const llmOpenRouterModelRow = this._addEntryRow(llmGroup, settings, 'llm-openrouter-model', _('OpenRouter LLM Model'));
+        const llmOpenRouterApiKeyRow = this._addSecretRow(llmGroup, settings, 'llm-openrouter-api-key', _('OpenRouter LLM API Key'));
 
         const updateLlmProviderVisibility = providerId => {
             const showOpenAi = providerId === 'openai';
             const showGroq = providerId === 'groq';
+            const showOpenRouter = providerId === 'openrouter';
 
             llmOpenAiEndpointRow.set_visible(showOpenAi);
             llmOpenAiModelRow.set_visible(showOpenAi);
@@ -287,6 +326,9 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
             llmGroqEndpointRow.set_visible(showGroq);
             llmGroqModelRow.set_visible(showGroq);
             llmGroqApiKeyRow.set_visible(showGroq);
+            llmOpenRouterEndpointRow.set_visible(showOpenRouter);
+            llmOpenRouterModelRow.set_visible(showOpenRouter);
+            llmOpenRouterApiKeyRow.set_visible(showOpenRouter);
         };
 
         updateLlmProviderVisibility(llmProviderOptions[llmProviderRow.selected]?.id || llmProviderOptions[0].id);

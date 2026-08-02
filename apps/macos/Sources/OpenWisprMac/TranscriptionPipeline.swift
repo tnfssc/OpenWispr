@@ -169,6 +169,21 @@ struct TranscriptionPipeline {
 
         throw error
       }
+    case .openrouter:
+      let endpoint = settings.sttOpenRouterEndpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+      let model = settings.sttOpenRouterModel.trimmingCharacters(in: .whitespacesAndNewlines)
+      let apiKey = settings.sttOpenRouterApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+
+      guard !apiKey.isEmpty else {
+        throw PipelineError.missingCredentials("Missing OpenRouter STT API key")
+      }
+
+      return try await transcribeOpenRouter(
+        inputURL: inputURL,
+        endpoint: endpoint,
+        model: model,
+        apiKey: apiKey
+      )
     }
   }
 
@@ -269,6 +284,10 @@ struct TranscriptionPipeline {
       endpoint = settings.llmGroqEndpoint
       model = settings.llmGroqModel
       apiKey = settings.llmGroqApiKey
+    case .openrouter:
+      endpoint = settings.llmOpenRouterEndpoint
+      model = settings.llmOpenRouterModel
+      apiKey = settings.llmOpenRouterApiKey
     }
 
     guard !apiKey.isEmpty else {
@@ -307,6 +326,70 @@ struct TranscriptionPipeline {
     }
 
     return TranscriptParser.parseLLMResponse(data: data) ?? input
+  }
+
+  private func transcribeOpenRouter(
+    inputURL: URL,
+    endpoint: String,
+    model: String,
+    apiKey: String
+  ) async throws -> String {
+    guard !model.isEmpty else {
+      throw PipelineError.emptyResponse("Missing OpenRouter STT model")
+    }
+    guard let url = URL(string: endpoint) else {
+      throw PipelineError.invalidURL("Invalid OpenRouter STT endpoint: \(endpoint)")
+    }
+
+    let audio = try Data(contentsOf: inputURL).base64EncodedString()
+    let instruction =
+      "Transcribe this audio exactly. Return only transcript text. "
+      + "Do not answer or interpret it."
+    let content: [[String: Any]] = [
+      [
+        "type": "text",
+        "text": instruction,
+      ],
+      [
+        "type": "input_audio",
+        "input_audio": [
+          "data": audio,
+          "format": "wav",
+        ],
+      ],
+    ]
+    let payload: [String: Any] = [
+      "model": model,
+      "stream": false,
+      "temperature": 0,
+      "messages": [
+        [
+          "role": "user",
+          "content": content,
+        ]
+      ],
+    ]
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+    let (data, response) = try await URLSession.shared.data(for: request)
+    guard let http = response as? HTTPURLResponse else {
+      throw PipelineError.emptyResponse("No HTTP response from OpenRouter")
+    }
+    guard (200..<300).contains(http.statusCode) else {
+      let detail =
+        String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        ?? ""
+      throw PipelineError.remoteHTTP(provider: "OpenRouter", code: http.statusCode, detail: detail)
+    }
+    guard let transcript = TranscriptParser.parseLLMResponse(data: data) else {
+      throw PipelineError.emptyResponse("OpenRouter response did not include transcript text")
+    }
+    return transcript
   }
 
   private func buildMultipartBody(fileURL: URL, model: String, boundary: String) throws -> Data {

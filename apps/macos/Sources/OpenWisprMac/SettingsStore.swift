@@ -130,6 +130,18 @@ final class SettingsStore: ObservableObject {
     didSet { persist("sttGroqApiKey", sttGroqApiKey) }
   }
 
+  @Published var sttOpenRouterEndpoint: String {
+    didSet { persist("sttOpenRouterEndpoint", sttOpenRouterEndpoint) }
+  }
+
+  @Published var sttOpenRouterModel: String {
+    didSet { persist("sttOpenRouterModel", sttOpenRouterModel) }
+  }
+
+  @Published var sttOpenRouterApiKey: String {
+    didSet { persist("sttOpenRouterApiKey", sttOpenRouterApiKey) }
+  }
+
   @Published var llmFilterEnabled: Bool {
     didSet { persist("llmFilterEnabled", llmFilterEnabled) }
   }
@@ -160,6 +172,18 @@ final class SettingsStore: ObservableObject {
 
   @Published var llmGroqApiKey: String {
     didSet { persist("llmGroqApiKey", llmGroqApiKey) }
+  }
+
+  @Published var llmOpenRouterEndpoint: String {
+    didSet { persist("llmOpenRouterEndpoint", llmOpenRouterEndpoint) }
+  }
+
+  @Published var llmOpenRouterModel: String {
+    didSet { persist("llmOpenRouterModel", llmOpenRouterModel) }
+  }
+
+  @Published var llmOpenRouterApiKey: String {
+    didSet { persist("llmOpenRouterApiKey", llmOpenRouterApiKey) }
   }
 
   @Published var llmCleanupPrompt: String {
@@ -208,6 +232,12 @@ final class SettingsStore: ObservableObject {
       ?? "https://api.groq.com/openai/v1/audio/transcriptions"
     sttGroqModel = defaults.string(forKey: "sttGroqModel") ?? "whisper-large-v3-turbo"
     sttGroqApiKey = defaults.string(forKey: "sttGroqApiKey") ?? ""
+    sttOpenRouterEndpoint =
+      defaults.string(forKey: "sttOpenRouterEndpoint")
+      ?? "https://openrouter.ai/api/v1/chat/completions"
+    sttOpenRouterModel =
+      defaults.string(forKey: "sttOpenRouterModel") ?? "nvidia/parakeet-tdt-0.6b-v3"
+    sttOpenRouterApiKey = defaults.string(forKey: "sttOpenRouterApiKey") ?? ""
 
     llmFilterEnabled = defaults.object(forKey: "llmFilterEnabled") as? Bool ?? false
     llmProvider =
@@ -221,6 +251,11 @@ final class SettingsStore: ObservableObject {
       ?? "https://api.groq.com/openai/v1/chat/completions"
     llmGroqModel = defaults.string(forKey: "llmGroqModel") ?? "qwen/qwen3.6-27b"
     llmGroqApiKey = defaults.string(forKey: "llmGroqApiKey") ?? ""
+    llmOpenRouterEndpoint =
+      defaults.string(forKey: "llmOpenRouterEndpoint")
+      ?? "https://openrouter.ai/api/v1/chat/completions"
+    llmOpenRouterModel = defaults.string(forKey: "llmOpenRouterModel") ?? "qwen/qwen3.6-27b"
+    llmOpenRouterApiKey = defaults.string(forKey: "llmOpenRouterApiKey") ?? ""
     let savedCleanupPrompt = defaults.string(forKey: "llmCleanupPrompt")
     if let savedCleanupPrompt,
       !savedCleanupPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -254,6 +289,9 @@ final class SettingsStore: ObservableObject {
       sttGroqEndpoint: sttGroqEndpoint,
       sttGroqModel: sttGroqModel,
       sttGroqApiKey: sttGroqApiKey,
+      sttOpenRouterEndpoint: sttOpenRouterEndpoint,
+      sttOpenRouterModel: sttOpenRouterModel,
+      sttOpenRouterApiKey: sttOpenRouterApiKey,
       llmFilterEnabled: llmFilterEnabled,
       llmProvider: llmProvider,
       llmOpenAIEndpoint: llmOpenAIEndpoint,
@@ -262,6 +300,9 @@ final class SettingsStore: ObservableObject {
       llmGroqEndpoint: llmGroqEndpoint,
       llmGroqModel: llmGroqModel,
       llmGroqApiKey: llmGroqApiKey,
+      llmOpenRouterEndpoint: llmOpenRouterEndpoint,
+      llmOpenRouterModel: llmOpenRouterModel,
+      llmOpenRouterApiKey: llmOpenRouterApiKey,
       llmCleanupPrompt: llmCleanupPrompt
     )
   }

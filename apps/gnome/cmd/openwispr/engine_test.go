@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -18,6 +19,57 @@ func withTestSecret(t *testing.T, key string) {
 	orig := readSecret
 	readSecret = func(_ string) (string, error) { return key, nil }
 	t.Cleanup(func() { readSecret = orig })
+}
+
+func TestTranscribeOpenRouterRequest(t *testing.T) {
+	inputPath := t.TempDir() + "/audio.wav"
+	if err := os.WriteFile(inputPath, []byte("fake-wav"), 0o600); err != nil {
+		t.Fatalf("write test audio: %v", err)
+	}
+
+	var capturedAuth, capturedModel, audioFormat string
+	var audioData string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		capturedAuth = r.Header.Get("Authorization")
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		capturedModel, _ = payload["model"].(string)
+		messages, _ := payload["messages"].([]any)
+		if len(messages) == 1 {
+			message, _ := messages[0].(map[string]any)
+			content, _ := message["content"].([]any)
+			if len(content) == 2 {
+				audioPart, _ := content[1].(map[string]any)
+				inputAudio, _ := audioPart["input_audio"].(map[string]any)
+				audioData, _ = inputAudio["data"].(string)
+				audioFormat, _ = inputAudio["format"].(string)
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Transcribed text"}}]}`))
+	}))
+	defer srv.Close()
+
+	got, err := transcribeOpenRouter(context.Background(), inputPath, srv.URL, "nvidia/parakeet-tdt-0.6b-v3", "test-key")
+	if err != nil {
+		t.Fatalf("transcribeOpenRouter returned error: %v", err)
+	}
+	if got != "Transcribed text" {
+		t.Errorf("unexpected transcript: %q", got)
+	}
+	if capturedAuth != "Bearer test-key" {
+		t.Errorf("unexpected auth header: %q", capturedAuth)
+	}
+	if capturedModel != "nvidia/parakeet-tdt-0.6b-v3" {
+		t.Errorf("unexpected model: %q", capturedModel)
+	}
+	if audioFormat != "wav" || audioData == "" {
+		t.Errorf("expected base64 WAV input_audio, got format=%q data=%q", audioFormat, audioData)
+	}
 }
 
 func TestParseLLMJSON(t *testing.T) {

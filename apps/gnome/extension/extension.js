@@ -952,12 +952,16 @@ class OpenWisprController {
             sttOpenAIModel: this._settings.get_string('stt-openai-model'),
             sttGroqEndpoint: this._settings.get_string('stt-groq-endpoint'),
             sttGroqModel: this._settings.get_string('stt-groq-model'),
+            sttOpenRouterEndpoint: this._settings.get_string('stt-openrouter-endpoint'),
+            sttOpenRouterModel: this._settings.get_string('stt-openrouter-model'),
             llmFilterEnabled: this._settings.get_boolean('llm-filter-enabled'),
             llmProvider,
             llmOpenAIEndpoint: this._settings.get_string('llm-openai-endpoint'),
             llmOpenAIModel: this._settings.get_string('llm-openai-model'),
             llmGroqEndpoint: this._settings.get_string('llm-groq-endpoint'),
             llmGroqModel: this._settings.get_string('llm-groq-model'),
+            llmOpenRouterEndpoint: this._settings.get_string('llm-openrouter-endpoint'),
+            llmOpenRouterModel: this._settings.get_string('llm-openrouter-model'),
             llmCleanupPrompt: this._settings.get_string('llm-cleanup-prompt'),
         };
 

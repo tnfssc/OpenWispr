@@ -1,5 +1,7 @@
 package org.futo.inputmethod.latin.uix.settings.pages
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -61,6 +63,7 @@ private fun OpenWisprSpeechSettings() {
             selected = config.provider,
             onSelect = { config = config.copy(provider = it); saved = false },
         )
+        ProviderOnboarding(config.provider)
         SecretField(
             value = config.keyFor(config.provider),
             label = "${config.provider.displayName} API key",
@@ -134,6 +137,7 @@ private fun OpenWisprRefinementSettings() {
             selected = config.refinementProvider,
             onSelect = { config = config.copy(refinementProvider = it); saved = false },
         )
+        ProviderOnboarding(config.refinementProvider)
         SecretField(
             value = config.keyFor(config.refinementProvider),
             label = "${config.refinementProvider.displayName} API key",
@@ -225,6 +229,32 @@ private fun ProviderPicker(
                     label = { Text(provider.displayName) },
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun ProviderOnboarding(provider: OpenWisprProvider) {
+    val context = LocalContext.current
+    val (message, action, url) = when (provider) {
+        OpenWisprProvider.GROQ -> Triple(
+            "Recommended: Groq is the fastest free default. Create a key, paste it below, and save.",
+            "Create Groq API key",
+            "https://console.groq.com/keys",
+        )
+        OpenWisprProvider.OPEN_ROUTER -> Triple(
+            "OpenRouter uses NVIDIA Parakeet for transcription and Qwen 3.6 27B for cleanup by default.",
+            "Create OpenRouter API key",
+            "https://openrouter.ai/keys",
+        )
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(message, style = MaterialTheme.typography.bodySmall)
+        Button(onClick = {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        }) {
+            Text(action)
         }
     }
 }

@@ -98,6 +98,16 @@ struct SettingsView: View {
       }
 
       Section("Speech To Text") {
+        Text(
+          "Recommended: Groq is the fastest free setup. Create a key at groq.com, paste it below, and record."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        Link(
+          "Create Groq API Key",
+          destination: URL(string: "https://console.groq.com/keys")!
+        )
+
         Picker("Provider", selection: $settings.sttProvider) {
           ForEach(STTProvider.allCases) { provider in
             Text(provider.label).tag(provider)
@@ -143,7 +153,7 @@ struct SettingsView: View {
           }
 
           LabeledContent("Model") {
-            TextField("whisper-large-v3", text: $settings.sttGroqModel)
+            TextField("whisper-large-v3-turbo", text: $settings.sttGroqModel)
               .multilineTextAlignment(.trailing)
               .textFieldStyle(.roundedBorder)
               .frame(width: 220)
@@ -151,6 +161,38 @@ struct SettingsView: View {
 
           LabeledContent("API Key") {
             SecureField("gsk_...", text: $settings.sttGroqApiKey)
+              .textFieldStyle(.roundedBorder)
+              .frame(minWidth: 320)
+          }
+
+        case .openrouter:
+          Text(
+            "Use NVIDIA Parakeet through OpenRouter. Audio is sent as an OpenRouter chat request."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          Link(
+            "Create OpenRouter API Key",
+            destination: URL(string: "https://openrouter.ai/keys")!
+          )
+
+          LabeledContent("Endpoint") {
+            TextField(
+              "https://openrouter.ai/api/v1/chat/completions", text: $settings.sttOpenRouterEndpoint
+            )
+            .textFieldStyle(.roundedBorder)
+            .frame(minWidth: 420)
+          }
+
+          LabeledContent("Model") {
+            TextField("nvidia/parakeet-tdt-0.6b-v3", text: $settings.sttOpenRouterModel)
+              .multilineTextAlignment(.trailing)
+              .textFieldStyle(.roundedBorder)
+              .frame(width: 280)
+          }
+
+          LabeledContent("API Key") {
+            SecureField("sk-or-...", text: $settings.sttOpenRouterApiKey)
               .textFieldStyle(.roundedBorder)
               .frame(minWidth: 320)
           }
@@ -201,7 +243,7 @@ struct SettingsView: View {
             }
 
             LabeledContent("Model") {
-              TextField("llama-3.1-8b-instant", text: $settings.llmGroqModel)
+              TextField("qwen/qwen3.6-27b", text: $settings.llmGroqModel)
                 .multilineTextAlignment(.trailing)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 220)
@@ -209,6 +251,37 @@ struct SettingsView: View {
 
             LabeledContent("API Key") {
               SecureField("gsk_...", text: $settings.llmGroqApiKey)
+                .textFieldStyle(.roundedBorder)
+                .frame(minWidth: 320)
+            }
+
+          case .openrouter:
+            Text("Use OpenRouter's Qwen model for cleanup.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            Link(
+              "Create OpenRouter API Key",
+              destination: URL(string: "https://openrouter.ai/keys")!
+            )
+
+            LabeledContent("Endpoint") {
+              TextField(
+                "https://openrouter.ai/api/v1/chat/completions",
+                text: $settings.llmOpenRouterEndpoint
+              )
+              .textFieldStyle(.roundedBorder)
+              .frame(minWidth: 420)
+            }
+
+            LabeledContent("Model") {
+              TextField("qwen/qwen3.6-27b", text: $settings.llmOpenRouterModel)
+                .multilineTextAlignment(.trailing)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 280)
+            }
+
+            LabeledContent("API Key") {
+              SecureField("sk-or-...", text: $settings.llmOpenRouterApiKey)
                 .textFieldStyle(.roundedBorder)
                 .frame(minWidth: 320)
             }

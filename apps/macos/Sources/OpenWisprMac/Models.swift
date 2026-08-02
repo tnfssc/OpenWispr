@@ -4,6 +4,7 @@ enum STTProvider: String, CaseIterable, Identifiable {
   case local
   case openai
   case groq
+  case openrouter
 
   var id: String { rawValue }
 
@@ -15,6 +16,8 @@ enum STTProvider: String, CaseIterable, Identifiable {
       "OpenAI Whisper"
     case .groq:
       "Groq Whisper"
+    case .openrouter:
+      "OpenRouter Parakeet"
     }
   }
 }
@@ -22,6 +25,7 @@ enum STTProvider: String, CaseIterable, Identifiable {
 enum LLMProvider: String, CaseIterable, Identifiable {
   case openai
   case groq
+  case openrouter
 
   var id: String { rawValue }
 
@@ -31,6 +35,8 @@ enum LLMProvider: String, CaseIterable, Identifiable {
       "OpenAI"
     case .groq:
       "Groq"
+    case .openrouter:
+      "OpenRouter"
     }
   }
 }
@@ -70,6 +76,9 @@ struct SettingsSnapshot {
   let sttGroqEndpoint: String
   let sttGroqModel: String
   let sttGroqApiKey: String
+  let sttOpenRouterEndpoint: String
+  let sttOpenRouterModel: String
+  let sttOpenRouterApiKey: String
 
   let llmFilterEnabled: Bool
   let llmProvider: LLMProvider
@@ -79,5 +88,8 @@ struct SettingsSnapshot {
   let llmGroqEndpoint: String
   let llmGroqModel: String
   let llmGroqApiKey: String
+  let llmOpenRouterEndpoint: String
+  let llmOpenRouterModel: String
+  let llmOpenRouterApiKey: String
   let llmCleanupPrompt: String
 }
