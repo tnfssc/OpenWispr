@@ -55,6 +55,10 @@ For local STT, point `Local Model Path` to a valid Whisper model file, for examp
 
 `~/openwispr/models/ggml-base.en.bin`
 
+## Provider onboarding
+
+Open Settings and choose **Groq** for the recommended fast free setup. Create a key in the [Groq Console](https://console.groq.com/keys), paste it into the Groq API key field, and keep the default models. See the shared [provider guide](../../docs/providers.md) for models and privacy behavior.
+
 ## Notes
 
 - This is a standalone macOS app codebase (not a GNOME extension port-in-place).

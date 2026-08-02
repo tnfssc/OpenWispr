@@ -11,6 +11,10 @@ The canonical source, releases, issue tracking, and contribution point for this 
 
 The code is licensed under the [FUTO Source First License 1.1](LICENSE.md).
 
+## Provider onboarding
+
+Open **OpenWispr voice input** in keyboard settings and choose **Groq** for the recommended fast free setup. Create a key in the [Groq Console](https://console.groq.com/keys), paste it, and keep the defaults. OpenRouter is also supported with keys from [OpenRouter](https://openrouter.ai/keys); model defaults are documented in the shared [provider guide](../../docs/providers.md).
+
 ## Issue tracking and contributing
 
 Report issues and open pull requests in the [OpenWispr monorepo](https://github.com/tnfssc/OpenWispr). Issues specific to OpenWispr voice input, branding, releases, or this fork belong here.

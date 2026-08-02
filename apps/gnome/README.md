@@ -128,6 +128,10 @@ Use this path if you want to skip local Whisper binaries and models.
     gnome-extensions enable openwispr-gnome-extension@tnfssc.github.com
     ```
 
+## Provider onboarding
+
+Open extension Preferences, choose **Groq** for the recommended fast free setup, and paste a key created in the [Groq Console](https://console.groq.com/keys). The default transcription and cleanup models are already selected. See the shared [provider guide](../../docs/providers.md) for model details and privacy behavior.
+
 ## Usage
 
 1.  **Start Dictation**: Click the microphone icon in the top bar, or set a custom keyboard shortcut in preferences.

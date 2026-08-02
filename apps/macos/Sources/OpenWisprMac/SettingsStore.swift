@@ -197,7 +197,7 @@ final class SettingsStore: ObservableObject {
     localModelPath =
       defaults.string(forKey: "localModelPath") ?? "~/openwispr/models/ggml-base.en.bin"
 
-    sttProvider = STTProvider(rawValue: defaults.string(forKey: "sttProvider") ?? "local") ?? .local
+    sttProvider = STTProvider(rawValue: defaults.string(forKey: "sttProvider") ?? "groq") ?? .groq
     sttOpenAIEndpoint =
       defaults.string(forKey: "sttOpenAIEndpoint")
       ?? "https://api.openai.com/v1/audio/transcriptions"
@@ -206,12 +206,12 @@ final class SettingsStore: ObservableObject {
     sttGroqEndpoint =
       defaults.string(forKey: "sttGroqEndpoint")
       ?? "https://api.groq.com/openai/v1/audio/transcriptions"
-    sttGroqModel = defaults.string(forKey: "sttGroqModel") ?? "whisper-large-v3"
+    sttGroqModel = defaults.string(forKey: "sttGroqModel") ?? "whisper-large-v3-turbo"
     sttGroqApiKey = defaults.string(forKey: "sttGroqApiKey") ?? ""
 
     llmFilterEnabled = defaults.object(forKey: "llmFilterEnabled") as? Bool ?? false
     llmProvider =
-      LLMProvider(rawValue: defaults.string(forKey: "llmProvider") ?? "openai") ?? .openai
+      LLMProvider(rawValue: defaults.string(forKey: "llmProvider") ?? "groq") ?? .groq
     llmOpenAIEndpoint =
       defaults.string(forKey: "llmOpenAIEndpoint") ?? "https://api.openai.com/v1/chat/completions"
     llmOpenAIModel = defaults.string(forKey: "llmOpenAIModel") ?? "gpt-4o-mini"
@@ -219,7 +219,7 @@ final class SettingsStore: ObservableObject {
     llmGroqEndpoint =
       defaults.string(forKey: "llmGroqEndpoint")
       ?? "https://api.groq.com/openai/v1/chat/completions"
-    llmGroqModel = defaults.string(forKey: "llmGroqModel") ?? "llama-3.1-8b-instant"
+    llmGroqModel = defaults.string(forKey: "llmGroqModel") ?? "qwen/qwen3.6-27b"
     llmGroqApiKey = defaults.string(forKey: "llmGroqApiKey") ?? ""
     let savedCleanupPrompt = defaults.string(forKey: "llmCleanupPrompt")
     if let savedCleanupPrompt,

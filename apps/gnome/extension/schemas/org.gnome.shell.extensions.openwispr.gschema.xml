@@ -38,7 +38,7 @@
       <summary>Minimum silence duration for trimming</summary>
     </key>
     <key name="stt-provider" type="s">
-      <default>'local'</default>
+      <default>'groq'</default>
       <summary>Speech-to-text provider</summary>
     </key>
     <key name="stt-openai-endpoint" type="s">
@@ -70,7 +70,7 @@
       <summary>Enable LLM cleanup of transcripts</summary>
     </key>
     <key name="llm-provider" type="s">
-      <default>'openai'</default>
+      <default>'groq'</default>
       <summary>LLM provider for transcript cleanup</summary>
     </key>
     <key name="llm-openai-endpoint" type="s">
@@ -90,7 +90,7 @@
       <summary>Groq chat completion endpoint URL</summary>
     </key>
     <key name="llm-groq-model" type="s">
-      <default>'llama-3.1-8b-instant'</default>
+      <default>'qwen/qwen3.6-27b'</default>
       <summary>Groq model for transcript cleanup</summary>
     </key>
     <key name="llm-groq-api-key" type="s">
