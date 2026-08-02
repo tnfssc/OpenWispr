@@ -27,9 +27,8 @@ jobs:
       - name: Build unstable release APK
         working-directory: apps/android-keyboard
         env:
-          VERSION_NAME: ${{ github.ref_name }}
           VERSION_CODE: ${{ github.run_number }}
-        run: ./gradlew assembleUnstableRelease
+        run: VERSION_NAME="${GITHUB_REF_NAME#keyboard-}" ./gradlew assembleUnstableRelease
 
       - name: Publish GitHub release
         env:
