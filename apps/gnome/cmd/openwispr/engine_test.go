@@ -197,8 +197,6 @@ func TestNormalizeCleanedTranscript(t *testing.T) {
 }
 
 func TestCleanupTranscriptOpenAIRequest(t *testing.T) {
-	t.Parallel()
-
 	withTestSecret(t, "test-key")
 
 	var capturedAuth string
@@ -409,7 +407,6 @@ func TestCleanupTranscriptErrorPaths(t *testing.T) {
 	t.Parallel()
 
 	t.Run("missing api key returns original and error", func(t *testing.T) {
-		t.Parallel()
 		withTestSecret(t, "")
 		cfg := pipelineConfig{
 			LLMProvider:       "openai",
@@ -432,7 +429,6 @@ func TestCleanupTranscriptErrorPaths(t *testing.T) {
 	})
 
 	t.Run("http 200 empty body returns original and error", func(t *testing.T) {
-		t.Parallel()
 		withTestSecret(t, "test-key")
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer r.Body.Close()
@@ -462,7 +458,6 @@ func TestCleanupTranscriptErrorPaths(t *testing.T) {
 	})
 
 	t.Run("hallucinated cleanup falls back to original without error", func(t *testing.T) {
-		t.Parallel()
 		withTestSecret(t, "test-key")
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer r.Body.Close()
@@ -492,7 +487,6 @@ func TestCleanupTranscriptErrorPaths(t *testing.T) {
 }
 
 func TestCleanupTranscriptGroqRoutingAndFailure(t *testing.T) {
-	t.Parallel()
 	withTestSecret(t, "test-key")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
