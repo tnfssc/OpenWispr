@@ -39,6 +39,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          lfs: true
+
+      - name: Fetch LFS objects in submodules
+        working-directory: apps/android-keyboard/java/assets/futo-swipe
+        run: git lfs pull
 
       - uses: actions/setup-java@v4
         with:
