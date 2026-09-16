@@ -4,14 +4,16 @@ public struct RecordingStore: Sendable {
   public let directory: URL
 
   public init(directory: URL) {
-    self.directory = directory
+    self.directory = Self.canonicalURL(directory)
   }
 
   public func recordings() throws -> [URL] {
     guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
     return try FileManager.default.contentsOfDirectory(
       at: directory, includingPropertiesForKeys: nil
-    ).filter { $0.pathExtension == "wav" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+    ).filter { $0.pathExtension == "wav" }
+      .map { Self.canonicalURL($0) }
+      .sorted { $0.lastPathComponent < $1.lastPathComponent }
   }
 
   public func save(_ source: URL) throws -> URL {
@@ -19,11 +21,16 @@ public struct RecordingStore: Sendable {
       at: directory, withIntermediateDirectories: true,
       attributes: [.posixPermissions: 0o700])
     let destination = directory.appendingPathComponent(
-      "\(Date().timeIntervalSince1970)-\(UUID().uuidString).wav")
+      "\(Date().timeIntervalSince1970)-\(UUID().uuidString).wav"
+    ).standardizedFileURL
     // Atomic writing leaves either a complete recoverable recording or no recording.
     try Data(contentsOf: source).write(to: destination, options: .atomic)
     try? FileManager.default.removeItem(at: source)
-    return destination
+    return Self.canonicalURL(destination)
+  }
+
+  private static func canonicalURL(_ url: URL) -> URL {
+    URL(fileURLWithPath: url.standardizedFileURL.resolvingSymlinksInPath().path)
   }
 
   public func remove(_ recording: URL) throws {

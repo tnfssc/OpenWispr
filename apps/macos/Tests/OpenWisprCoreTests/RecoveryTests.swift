@@ -152,3 +152,18 @@ private actor Attempts {
   }
   #expect(try Data(contentsOf: source) == bytes)
 }
+
+@Test func recordingURLsRemainStableThroughDirectoryAliases() throws {
+  let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: root) }
+  let actual = root.appendingPathComponent("actual")
+  try FileManager.default.createDirectory(at: actual, withIntermediateDirectories: true)
+  let alias = root.appendingPathComponent("alias")
+  try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: actual)
+  let source = root.appendingPathComponent("input.wav")
+  try Data("audio".utf8).write(to: source)
+  let saved = try RecordingStore(directory: alias).save(source)
+  let reopened = try RecordingStore(directory: actual).recordings()
+  #expect(reopened == [saved])
+}
