@@ -12,6 +12,11 @@ let package = Package(
         .executable(name: "OpenWisprSelfTest", targets: ["OpenWisprSelfTest"]),
     ],
     targets: [
+        .testTarget(
+            name: "OpenWisprCoreTests",
+            dependencies: ["OpenWisprCore", "OpenWispr"],
+            path: "Tests/OpenWisprCoreTests"
+        ),
         .target(
             name: "OpenWisprCore",
             path: "Sources/OpenWisprCore"

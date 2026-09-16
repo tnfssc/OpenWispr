@@ -8,18 +8,30 @@ final class AppState: ObservableObject {
   @Published private(set) var lastTranscript: String = ""
   @Published private(set) var lastError: String = ""
 
+  @Published private(set) var savedRecordings: [URL] = []
+  @Published private(set) var processingLabel = "Processing"
+
+  private let recordingStore = RecordingStore(
+    directory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+      .appendingPathComponent("OpenWispr/PendingRecordings", isDirectory: true))
+  private var processingTask: Task<Void, Never>?
+
   let settings: SettingsStore
 
   private let recorder = AudioRecorder()
   private let notifications = NotificationManager()
   private let hotkeys = HotkeyManager()
   private let startAtLogin = StartAtLoginManager()
-  private let pipeline = TranscriptionPipeline()
   private var pendingPasteTargetPID: pid_t?
   private var isSyncingStartAtLoginSetting = false
 
   init(settings: SettingsStore = SettingsStore()) {
     self.settings = settings
+    do {
+      savedRecordings = try recordingStore.recordings()
+    } catch {
+      lastError = "Could not load saved recordings: \(error.localizedDescription)"
+    }
 
     self.settings.hotkeyDidChange = { [weak self] in
       Task { @MainActor in
@@ -57,7 +69,7 @@ final class AppState: ObservableObject {
     case .recording:
       "Recording"
     case .processing:
-      "Processing"
+      processingLabel
     case .error(let message):
       "Error: \(message)"
     }
@@ -148,22 +160,86 @@ final class AppState: ObservableObject {
     }
 
     guard transcribe else {
+      try? FileManager.default.removeItem(at: inputURL)
       phase = .idle
       pendingPasteTargetPID = nil
       return
     }
 
+    let savedURL: URL
+    do {
+      savedURL = try recordingStore.save(inputURL)
+    } catch {
+      // Keep the original available in this session if durable storage failed.
+      savedRecordings.append(inputURL)
+      setError(
+        "Could not save recording: \(error.localizedDescription). Recording available until quit.")
+      return
+    }
+    savedRecordings.append(savedURL)
+    processRecording(savedURL, trigger: trigger, manualRetry: false)
+  }
+
+  func retrySavedRecording() {
+    guard !isProcessing, !isRecording, let url = savedRecordings.first else { return }
+    pendingPasteTargetPID = nil
+    processRecording(url, trigger: .menu, manualRetry: true)
+  }
+
+  func discardSavedRecording() {
+    guard !isProcessing, !isRecording, let url = savedRecordings.first else { return }
+    do {
+      try recordingStore.remove(url)
+      savedRecordings.removeAll { $0 == url }
+      lastError = ""
+      phase = .idle
+    } catch {
+      setError("Could not discard recording: \(error.localizedDescription)")
+    }
+  }
+
+  func cancelProcessing() {
+    guard isProcessing else { return }
+    processingLabel = "Canceling…"
+    processingTask?.cancel()
+  }
+
+  private func processRecording(_ url: URL, trigger: RecordingTrigger, manualRetry: Bool) {
     phase = .processing
+    processingLabel = "Processing"
+    lastError = ""
     let snapshot = settings.snapshot()
 
-    Task {
+    processingTask = Task {
+      defer { processingTask = nil }
       do {
-        let text = try await pipeline.run(inputURL: inputURL, settings: snapshot)
-        await handleTranscript(text, settings: snapshot, trigger: trigger)
+        let pipeline = TranscriptionPipeline(onRetry: { [weak self] attempt in
+          await self?.showRetry(attempt)
+        })
+        let text = try await withTimeout(seconds: 90) {
+          try await pipeline.run(inputURL: url, settings: snapshot)
+        }
+        try Task.checkCancellation()
+        // Remove audio only after a successful result, including a no-speech result.
+        try recordingStore.remove(url)
+        savedRecordings.removeAll { $0 == url }
+        await handleTranscript(
+          text, settings: snapshot, trigger: trigger, allowAutoPaste: !manualRetry)
       } catch {
-        setError(error.localizedDescription)
+        if Task.isCancelled {
+          setError("Transcription canceled. Your recording is saved.")
+        } else if error is TranscriptionTimeout || (error as? URLError)?.code == .timedOut {
+          setError("Transcription timed out. Your recording is saved.")
+        } else {
+          setError("\(error.localizedDescription). Your recording is saved.")
+        }
       }
     }
+  }
+
+  private func showRetry(_ attempt: Int) {
+    guard isProcessing, !Task.isCancelled else { return }
+    processingLabel = "Retrying… (attempt \(attempt) of 3)"
   }
 
   func requestAccessibilityPrompt() {
@@ -191,11 +267,14 @@ final class AppState: ObservableObject {
   }
 
   private func handleTranscript(
-    _ text: String, settings: SettingsSnapshot, trigger: RecordingTrigger
+    _ text: String, settings: SettingsSnapshot, trigger: RecordingTrigger, allowAutoPaste: Bool
   )
     async
   {
-    phase = .idle
+    defer {
+      phase = .idle
+      pendingPasteTargetPID = nil
+    }
 
     let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !cleaned.isEmpty else {
@@ -209,15 +288,19 @@ final class AppState: ObservableObject {
 
     lastTranscript = cleaned
     let clipboardSnapshot =
-      settings.autoPasteEnabled && settings.restoreClipboardEnabled
+      allowAutoPaste && settings.autoPasteEnabled && settings.restoreClipboardEnabled
       ? PasteInjector.captureClipboard() : nil
     PasteInjector.copyToClipboard(cleaned)
 
-    if settings.autoPasteEnabled {
+    if allowAutoPaste && settings.autoPasteEnabled {
       if trigger == .hold {
         try? await Task.sleep(nanoseconds: 120_000_000)
       }
 
+      guard !Task.isCancelled else {
+        pendingPasteTargetPID = nil
+        return
+      }
       do {
         try PasteInjector.pasteClipboard(preferredTargetPID: pendingPasteTargetPID)
 

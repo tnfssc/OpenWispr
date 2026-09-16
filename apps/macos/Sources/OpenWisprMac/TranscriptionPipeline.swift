@@ -24,13 +24,42 @@ enum PipelineError: LocalizedError {
   }
 }
 
-struct TranscriptionPipeline {
+struct TranscriptionPipeline: Sendable {
+  var onRetry: @Sendable (Int) async -> Void = { _ in }
+
+  var requestTimeout: Double = 30
+  var sessionConfiguration: @Sendable () -> URLSessionConfiguration = { .ephemeral }
+
+  private func send(_ request: URLRequest) async throws -> (Data, URLResponse) {
+    // A resource timeout bounds even a response that keeps trickling bytes.
+    let configuration = sessionConfiguration()
+    configuration.timeoutIntervalForRequest = requestTimeout
+    configuration.timeoutIntervalForResource = requestTimeout
+    let session = URLSession(configuration: configuration)
+    defer { session.invalidateAndCancel() }
+    return try await withTimeout(seconds: requestTimeout) {
+      try await session.data(for: request)
+    }
+  }
+
   func run(inputURL: URL, settings: SettingsSnapshot) async throws -> String {
     let preparedInput = try await trimSilenceIfNeeded(inputURL: inputURL, settings: settings)
     let cleanupURLs = cleanupCandidates(originalInput: inputURL, preparedInput: preparedInput)
     defer { cleanupTemporaryFiles(cleanupURLs) }
 
-    var transcript = try await transcribe(inputURL: preparedInput, settings: settings)
+    try Task.checkCancellation()
+    var transcript = try await RetryPolicy.run(
+      shouldRetry: { error in
+        if case PipelineError.remoteHTTP(_, let code, _) = error {
+          return RetryPolicy.isTransient(statusCode: code)
+        }
+        return RetryPolicy.isTransient(error)
+      },
+      onRetry: onRetry,
+      operation: {
+        try await transcribe(inputURL: preparedInput, settings: settings)
+      }
+    )
     transcript = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
 
     guard !transcript.isEmpty else {
@@ -41,15 +70,17 @@ struct TranscriptionPipeline {
       do {
         transcript = try await cleanupTranscript(transcript, settings: settings)
       } catch {
+        try Task.checkCancellation()
         // Fallback to raw transcript by design.
       }
     }
 
+    try Task.checkCancellation()
     return transcript.trimmingCharacters(in: .whitespacesAndNewlines)
   }
 
   private func cleanupCandidates(originalInput: URL, preparedInput: URL) -> [URL] {
-    var urls: [URL] = [originalInput]
+    var urls: [URL] = []
 
     if preparedInput.path != originalInput.path {
       urls.append(preparedInput)
@@ -61,14 +92,7 @@ struct TranscriptionPipeline {
   }
 
   private func cleanupTemporaryFiles(_ urls: [URL]) {
-    let temporaryRoot = FileManager.default.temporaryDirectory.standardizedFileURL.path
-
     for fileURL in urls {
-      let path = fileURL.standardizedFileURL.path
-      guard path.hasPrefix(temporaryRoot) else {
-        continue
-      }
-
       try? FileManager.default.removeItem(at: fileURL)
     }
   }
@@ -102,6 +126,8 @@ struct TranscriptionPipeline {
         ]
       )
     } catch {
+      try? FileManager.default.removeItem(at: trimmedURL)
+      try Task.checkCancellation()
       return inputURL
     }
 
@@ -109,6 +135,7 @@ struct TranscriptionPipeline {
       let size = attrs[.size] as? NSNumber,
       size.intValue > 0
     else {
+      try? FileManager.default.removeItem(at: trimmedURL)
       return inputURL
     }
 
@@ -245,7 +272,7 @@ struct TranscriptionPipeline {
     request.setValue(
       "multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
-    let (data, response) = try await URLSession.shared.data(for: request)
+    let (data, response) = try await send(request)
     guard let http = response as? HTTPURLResponse else {
       throw PipelineError.emptyResponse("No HTTP response from STT provider")
     }
@@ -317,7 +344,7 @@ struct TranscriptionPipeline {
     request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-    let (data, response) = try await URLSession.shared.data(for: request)
+    let (data, response) = try await send(request)
     guard let http = response as? HTTPURLResponse else {
       throw PipelineError.emptyResponse("No HTTP response from LLM provider")
     }
@@ -376,7 +403,7 @@ struct TranscriptionPipeline {
     request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-    let (data, response) = try await URLSession.shared.data(for: request)
+    let (data, response) = try await send(request)
     guard let http = response as? HTTPURLResponse else {
       throw PipelineError.emptyResponse("No HTTP response from OpenRouter")
     }

@@ -9,3 +9,6 @@ swift build
 
 echo "[check] self tests"
 ./scripts/test.sh
+
+echo "[check] recovery and retry tests"
+swift test

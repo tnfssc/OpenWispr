@@ -19,6 +19,19 @@ A native macOS menu bar dictation app inspired by the [OpenWispr GNOME flow](../
 - Optional clipboard restore after auto-paste
 - Optional start-at-login toggle (when running as a bundled `.app`)
 
+## Failed recordings and retries
+
+Temporary network failures and retryable server errors get up to three transcription
+attempts, with 1- and 3-second delays. Each network request is limited to 30 seconds;
+the full processing cycle (including trimming and optional cleanup) is limited to 90 seconds.
+Cancel stops processing and preserves the audio.
+
+Failed or canceled recordings survive app restarts in
+`~/Library/Application Support/OpenWispr/PendingRecordings`. The menu shows the number
+of saved recordings. **Retry** processes the oldest using current settings and copies
+the result without auto-pasting; **Discard** deletes the oldest. New dictation keeps
+previously saved recordings. Audio is deleted after successful transcription or discard.
+
 ## Dependencies (Homebrew)
 
 ```bash

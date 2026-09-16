@@ -25,6 +25,24 @@ struct MenuBarContentView: View {
       .keyboardShortcut("r", modifiers: [.control, .option])
       .disabled(appState.isProcessing)
 
+      if appState.isProcessing {
+        Button("Cancel") { appState.cancelProcessing() }
+      }
+
+      if !appState.savedRecordings.isEmpty && !appState.isProcessing {
+        Text("Saved recordings: \(appState.savedRecordings.count)")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        HStack {
+          Button("Retry") { appState.retrySavedRecording() }
+          Button("Discard") { appState.discardSavedRecording() }
+        }
+        .disabled(appState.isRecording)
+        Text("Retry processes the oldest recording and copies the result.")
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+      }
+
       if !appState.lastTranscript.isEmpty {
         HStack {
           Text("Last transcript")
@@ -36,7 +54,9 @@ struct MenuBarContentView: View {
           Button("Copy") {
             PasteInjector.copyToClipboard(appState.lastTranscript)
           }
-          .buttonStyle(.plain)
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+          .fixedSize()
           .font(.caption)
         }
 
@@ -90,6 +110,7 @@ struct OpenWisprApp: App {
       MenuBarContentView()
         .environmentObject(appState)
     }
+    .menuBarExtraStyle(.window)
 
     Settings {
       SettingsView(settings: appState.settings)

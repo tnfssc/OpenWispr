@@ -54,7 +54,7 @@ enum AppPhase: Equatable {
   case error(String)
 }
 
-struct SettingsSnapshot {
+struct SettingsSnapshot: Sendable {
   let holdToSpeakEnabled: Bool
   let holdShortcut: String
   let toggleShortcut: String
