@@ -3,6 +3,7 @@ package org.futo.inputmethod.v2keyboard
 import android.content.Context
 import android.content.res.AssetManager
 import android.util.Log
+import com.charleskorn.kaml.AnchorsAndAliases
 import com.charleskorn.kaml.PolymorphismStyle
 import com.charleskorn.kaml.Yaml
 import com.charleskorn.kaml.YamlConfiguration
@@ -172,7 +173,7 @@ private val yaml = Yaml(
     },
     YamlConfiguration(
         polymorphismStyle = PolymorphismStyle.Property,
-        allowAnchorsAndAliases = true
+        anchorsAndAliases = AnchorsAndAliases.Permitted(maxAliasCount = null)
     )
 )
 

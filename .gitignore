@@ -17,6 +17,7 @@ out/
 # Android keyboard
 .externalNativeBuild/
 .gradle/
+.kotlin/
 .idea/
 LatinIME.iml
 local.properties

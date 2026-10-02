@@ -11,9 +11,13 @@ on:
       - "apps/android-keyboard/java/src/org/futo/inputmethod/latin/uix/settings/SettingsNavigator.kt"
       - "apps/android-keyboard/java/src/org/futo/inputmethod/latin/uix/settings/pages/OpenWisprVoiceSettings.kt"
       - "apps/android-keyboard/java/src/org/futo/inputmethod/latin/uix/settings/pages/VoiceInput.kt"
-      - "apps/android-keyboard/src/test/java/org/futo/inputmethod/latin/openwispr/**"
+      - "apps/android-keyboard/src/test/**"
       - "apps/android-keyboard/tests/src/org/futo/inputmethod/latin/openwispr/**"
+      - "apps/android-keyboard/java/src/org/futo/inputmethod/v2keyboard/LayoutManager.kt"
       - "apps/android-keyboard/build.gradle"
+      - "apps/android-keyboard/settings.gradle"
+      - "apps/android-keyboard/gradle.properties"
+      - "apps/android-keyboard/gradle/wrapper/**"
       - ".gitmodules"
       - ".github/workflows/ci-android-keyboard.yml"
   pull_request:
@@ -24,9 +28,13 @@ on:
       - "apps/android-keyboard/java/src/org/futo/inputmethod/latin/uix/settings/SettingsNavigator.kt"
       - "apps/android-keyboard/java/src/org/futo/inputmethod/latin/uix/settings/pages/OpenWisprVoiceSettings.kt"
       - "apps/android-keyboard/java/src/org/futo/inputmethod/latin/uix/settings/pages/VoiceInput.kt"
-      - "apps/android-keyboard/src/test/java/org/futo/inputmethod/latin/openwispr/**"
+      - "apps/android-keyboard/src/test/**"
       - "apps/android-keyboard/tests/src/org/futo/inputmethod/latin/openwispr/**"
+      - "apps/android-keyboard/java/src/org/futo/inputmethod/v2keyboard/LayoutManager.kt"
       - "apps/android-keyboard/build.gradle"
+      - "apps/android-keyboard/settings.gradle"
+      - "apps/android-keyboard/gradle.properties"
+      - "apps/android-keyboard/gradle/wrapper/**"
       - ".gitmodules"
       - ".github/workflows/ci-android-keyboard.yml"
 
@@ -36,7 +44,7 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
           lfs: true
@@ -45,17 +53,17 @@ jobs:
         working-directory: apps/android-keyboard/java/assets/futo-swipe
         run: git lfs pull
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
 
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
 
-      - name: Test OpenWispr voice backend
+      - name: Test keyboard and compile instrumentation tests
         working-directory: apps/android-keyboard
         env:
           VERSION_CODE: ${{ github.run_number }}
           VERSION_NAME: ci-${{ github.run_number }}
           BRANCH_NAME: develop
-        run: ./gradlew testUnstableDebugUnitTest --tests org.futo.inputmethod.latin.openwispr.OpenWisprBackendTest
+        run: ./gradlew testUnstableDebugUnitTest compileUnstableDebugAndroidTestJavaWithJavac
