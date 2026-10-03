@@ -19,6 +19,7 @@ import android.content.res.TypedArray
 import android.graphics.drawable.Drawable
 import org.futo.inputmethod.latin.uix.DynamicThemeProvider
 import org.futo.inputmethod.latin.uix.actions.AllActionsMap
+import org.futo.inputmethod.latin.uix.actions.AllActions
 
 class KeyboardIconsSet {
     private var provider: DynamicThemeProvider? = null
@@ -88,6 +89,14 @@ class KeyboardIconsSet {
                 add("action_${it}")
             }
         }.toSet()
+
+        @JvmStatic
+        fun shouldTintIcon(iconId: String?): Boolean {
+            if (iconId?.startsWith("action_") != true) return true
+            val id = iconId.removePrefix("action_")
+            val action = AllActionsMap[id] ?: id.toIntOrNull()?.let { AllActions.getOrNull(it) }
+            return action?.tintIcon ?: true
+        }
 
         @JvmStatic
         fun iconExists(iconId: String?): Boolean {

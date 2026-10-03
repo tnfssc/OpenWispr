@@ -94,6 +94,7 @@ fun ActionItem(action: Action, modifier: Modifier = Modifier, dragIcon: Boolean 
                     Icon(
                         painterResource(id = action.icon),
                         contentDescription = null,
+                        tint = if (action.tintIcon) LocalContentColor.current else androidx.compose.ui.graphics.Color.Unspecified,
                         modifier = Modifier.align(
                             CenterHorizontally
                         )

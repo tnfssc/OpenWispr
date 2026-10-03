@@ -75,7 +75,8 @@ data class RecordingSettings(
 
 data class AudioRecognizerSettings(
     val transcriptionBackend: AudioTranscriptionBackend,
-    val recordingConfiguration: RecordingSettings
+    val recordingConfiguration: RecordingSettings,
+    val livePreview: AudioPreview? = null,
 )
 
 class AudioRecognizer(
@@ -176,6 +177,7 @@ class AudioRecognizer(
     }
 
     fun reset() {
+        settings.livePreview?.close()
         recorder?.stop()
         recorderJob?.cancel()
 
@@ -332,6 +334,7 @@ class AudioRecognizer(
             }
 
             pcmSamples.put(samples, 0, nRead)
+            settings.livePreview?.accept(samples, nRead)
 
             // Don't set hasTalked if the start sound may still be playing, otherwise on some
             // devices the rms just explodes and `hasTalked` is always true
@@ -390,6 +393,7 @@ class AudioRecognizer(
                         break
                     }
                     pcmSamples.put(samples, 0, nRead2)
+                    settings.livePreview?.accept(samples, nRead2)
                 } else {
                     break
                 }
@@ -468,6 +472,7 @@ class AudioRecognizer(
         }
 
         focusAudio()
+        settings.livePreview?.start(SAMPLE_RATE_HZ)
 
         listener.recordingStarted(device)
     }
@@ -501,27 +506,25 @@ class AudioRecognizer(
     }
 
     private fun onFinishRecording() {
-        recorderJob?.cancel()
-
         if (!isRecording) {
             throw IllegalStateException("Should not call onFinishRecording when not recording")
         }
 
         isRecording = false
+        val recording = recorderJob
+        recording?.cancel()
         recorder?.stop()
+        settings.livePreview?.close()
 
         listener.processing()
 
-        if (!speechDetected) {
-            lifecycleScope.launch(Dispatchers.Main) {
-                listener.finished("")
-            }
-            return
-        }
-
         modelJob = lifecycleScope.launch {
-            withContext(Dispatchers.IO) {
-                runModel()
+            // Freeze the final PCM snapshot before handing its reusable array to the provider.
+            recording?.join()
+            if (!speechDetected) {
+                listener.finished("")
+            } else {
+                withContext(Dispatchers.IO) { runModel() }
             }
         }
     }

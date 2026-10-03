@@ -40,6 +40,8 @@ interface ActionInputTransaction {
     fun updatePartial(text: String)
     fun commit(text: String)
     fun cancel()
+    /** End a cancelled preview without committing its provisional text. */
+    fun discardPartial() { updatePartial(""); cancel() }
 }
 
 data class DialogRequestItem(
@@ -191,6 +193,7 @@ data class Action(
     val shownInEditor: Boolean = true,
 
     val settingsMenu: UserSettingsMenu? = null,
+    val tintIcon: Boolean = true,
 )
 
 data class LangSpecAction(

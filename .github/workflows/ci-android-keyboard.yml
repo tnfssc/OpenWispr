@@ -5,43 +5,19 @@ on:
     branches:
       - "**"
     paths:
-      - "apps/android-keyboard/java/src/org/futo/inputmethod/latin/openwispr/**"
-      - "apps/android-keyboard/voiceinput-shared/**"
-      - "apps/android-keyboard/java/src/org/futo/inputmethod/latin/uix/actions/VoiceInputAction.kt"
-      - "apps/android-keyboard/java/src/org/futo/inputmethod/latin/uix/settings/SettingsNavigator.kt"
-      - "apps/android-keyboard/java/src/org/futo/inputmethod/latin/uix/settings/pages/OpenWisprVoiceSettings.kt"
-      - "apps/android-keyboard/java/src/org/futo/inputmethod/latin/uix/settings/pages/VoiceInput.kt"
-      - "apps/android-keyboard/src/test/**"
-      - "apps/android-keyboard/tests/src/org/futo/inputmethod/latin/openwispr/**"
-      - "apps/android-keyboard/java/src/org/futo/inputmethod/v2keyboard/LayoutManager.kt"
-      - "apps/android-keyboard/build.gradle"
-      - "apps/android-keyboard/settings.gradle"
-      - "apps/android-keyboard/gradle.properties"
-      - "apps/android-keyboard/gradle/wrapper/**"
+      - "apps/android-keyboard/**"
       - ".gitmodules"
       - ".github/workflows/ci-android-keyboard.yml"
   pull_request:
     paths:
-      - "apps/android-keyboard/java/src/org/futo/inputmethod/latin/openwispr/**"
-      - "apps/android-keyboard/voiceinput-shared/**"
-      - "apps/android-keyboard/java/src/org/futo/inputmethod/latin/uix/actions/VoiceInputAction.kt"
-      - "apps/android-keyboard/java/src/org/futo/inputmethod/latin/uix/settings/SettingsNavigator.kt"
-      - "apps/android-keyboard/java/src/org/futo/inputmethod/latin/uix/settings/pages/OpenWisprVoiceSettings.kt"
-      - "apps/android-keyboard/java/src/org/futo/inputmethod/latin/uix/settings/pages/VoiceInput.kt"
-      - "apps/android-keyboard/src/test/**"
-      - "apps/android-keyboard/tests/src/org/futo/inputmethod/latin/openwispr/**"
-      - "apps/android-keyboard/java/src/org/futo/inputmethod/v2keyboard/LayoutManager.kt"
-      - "apps/android-keyboard/build.gradle"
-      - "apps/android-keyboard/settings.gradle"
-      - "apps/android-keyboard/gradle.properties"
-      - "apps/android-keyboard/gradle/wrapper/**"
+      - "apps/android-keyboard/**"
       - ".gitmodules"
       - ".github/workflows/ci-android-keyboard.yml"
 
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
 
     steps:
       - uses: actions/checkout@v7
@@ -60,10 +36,23 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
 
-      - name: Test keyboard and compile instrumentation tests
+      - name: Test keyboard and build debug and release APKs
         working-directory: apps/android-keyboard
         env:
           VERSION_CODE: ${{ github.run_number }}
           VERSION_NAME: ci-${{ github.run_number }}
           BRANCH_NAME: develop
-        run: ./gradlew testUnstableDebugUnitTest compileUnstableDebugAndroidTestJavaWithJavac
+        run: >-
+          ./gradlew --max-workers=2
+          testUnstableDebugUnitTest compileUnstableDebugAndroidTestJavaWithJavac
+          assembleUnstableDebug assembleStableRelease
+
+      - name: Upload APKs and test results
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-voice-${{ github.run_number }}
+          path: |
+            apps/android-keyboard/build/outputs/apk/unstable/debug/*.apk
+            apps/android-keyboard/build/outputs/apk/stable/release/*.apk
+            apps/android-keyboard/build/reports/tests/testUnstableDebugUnitTest/
+          retention-days: 7

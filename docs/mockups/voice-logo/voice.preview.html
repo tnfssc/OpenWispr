@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>OpenWispr — component states</title><link rel="stylesheet" href="./tokens.css">
+<style>
+/* Hallmark · component: voice input · pre-emit critique: P5 H4 E4 S5 R5 V4 */
+html, body { overflow-x: clip; }
+body { margin: 0; padding: 24px; background: var(--color-paper); color: var(--color-ink); font: 14px var(--font-body); }
+h1 { font: 500 24px var(--font-display); font-style: normal; overflow-wrap: anywhere; }
+a { color: var(--color-accent); display: inline-block; padding: 12px 0; }
+.states { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 24px; }
+figure { margin: 0; min-width: 0; }
+figcaption { margin: 0 0 8px; }
+iframe { width: 100%; height: 420px; border: 1px solid var(--color-rule); }
+</style></head>
+<body><h1>Voice input — eight states</h1><a href="./index.html">Back to interactive preview</a><div class="states" id="states"></div>
+<script>
+const states = [['Default', 'waiting'], ['Hover', 'waiting', 'hover'], ['Focus', 'waiting', 'focus'], ['Active', 'listening', 'active'], ['Disabled', 'disabled'], ['Loading', 'transcribing'], ['Error', 'error'], ['Success', 'success']];
+for (const [label, state, style] of states) {
+  const figure = document.createElement('figure');
+  const caption = document.createElement('figcaption'); caption.textContent = label;
+  const frame = document.createElement('iframe'); frame.title = `${label} voice input`; frame.src = `./index.html?presentation=1&state=${state}${style ? '&style=' + style : ''}`;
+  figure.append(caption, frame); document.getElementById('states').append(figure);
+}
+</script></body></html>

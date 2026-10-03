@@ -35,6 +35,7 @@ import android.view.View;
 
 import org.futo.inputmethod.keyboard.internal.KeyDrawParams;
 import org.futo.inputmethod.keyboard.internal.KeyVisualAttributes;
+import org.futo.inputmethod.keyboard.internal.KeyboardIconsSet;
 import org.futo.inputmethod.latin.uix.DynamicThemeProvider;
 import org.futo.inputmethod.latin.R;
 import org.futo.inputmethod.latin.common.Constants;
@@ -588,7 +589,11 @@ public class KeyboardView extends View {
                 hintX = (int)centerX - iconWidth / 2;
             }
 
-            hintIcon.setTint(kdc.getHintColor());
+            if (KeyboardIconsSet.shouldTintIcon(key.getEffectiveHintIcon())) {
+                hintIcon.setTint(kdc.getHintColor());
+            } else {
+                hintIcon.setTintList(null);
+            }
             drawIcon(canvas, hintIcon, hintX, hintY, iconWidth, iconHeight);
         }
 
@@ -619,7 +624,12 @@ public class KeyboardView extends View {
             }
             final int iconX = (keyWidth - iconWidth) / 2; // Align horizontally center.
 
-            icon.setTint(kdc.getTextColor());
+            final String iconId = key.getIconOverride() != null ? key.getIconOverride() : key.getIconId();
+            if (KeyboardIconsSet.shouldTintIcon(iconId)) {
+                icon.setTint(kdc.getTextColor());
+            } else {
+                icon.setTintList(null);
+            }
             drawIcon(canvas, icon, iconX, iconY, iconWidth, iconHeight);
         }
 

@@ -1,5 +1,6 @@
 package org.futo.inputmethod.latin.uix.actions
 
+import android.os.Build
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -18,9 +19,7 @@ import androidx.compose.ui.semantics.traversalIndex
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
 import org.futo.inputmethod.latin.R
 import org.futo.inputmethod.latin.openwispr.OpenWisprConfig
@@ -46,6 +45,8 @@ import org.futo.voiceinput.shared.RecognizerViewListener
 import org.futo.voiceinput.shared.RecognizerViewSettings
 import org.futo.voiceinput.shared.RecordingSettings
 import org.futo.voiceinput.shared.SoundPlayer
+import org.futo.voiceinput.shared.OnDeviceSpeechPreview
+import org.futo.voiceinput.shared.AudioPreview
 import org.futo.voiceinput.shared.ui.MicrophoneDeviceState
 
 val SystemVoiceInputAction = Action(
@@ -103,6 +104,15 @@ private class VoiceInputActionWindow(
 ) : ActionWindow(), RecognizerViewListener {
     private val context = manager.getContext()
     private var shouldPlaySounds = false
+    private var closed = false
+
+    private fun localPreview(): AudioPreview? {
+        if (Build.VERSION.SDK_INT < 33) return null
+        val language = config.language.trim().ifBlank {
+            manager.getActiveLocales().firstOrNull()?.toLanguageTag() ?: java.util.Locale.getDefault().toLanguageTag()
+        }
+        return OnDeviceSpeechPreview(context, manager.getLifecycleScope(), language, ::partialResult)
+    }
 
     private fun loadSettings(): RecognizerViewSettings {
         shouldPlaySounds = context.getSetting(ENABLE_SOUND)
@@ -112,6 +122,7 @@ private class VoiceInputActionWindow(
             shouldAnimateBubble = context.getSetting(ANIMATE_BUBBLE),
             failureMessage = "Transcription failed. Tap to check OpenWispr provider settings.",
             transcriptionBackend = OpenWisprTranscriptionBackend(config),
+            livePreview = localPreview(),
             recordingConfiguration = RecordingSettings(
                 preferBluetoothMic = context.getSetting(PREFER_BLUETOOTH),
                 requestAudioFocus = context.getSetting(AUDIO_FOCUS),
@@ -122,7 +133,7 @@ private class VoiceInputActionWindow(
     }
 
     private val recognizerView: MutableState<RecognizerView?> = mutableStateOf(null)
-    private val initJob = manager.getLifecycleScope().launch(Dispatchers.Default) {
+    private val initJob = manager.getLifecycleScope().launch(Dispatchers.Main) {
         yield()
         val view = RecognizerView(
             context = context,
@@ -145,12 +156,7 @@ private class VoiceInputActionWindow(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .clickable(
-                    onClick = { recognizerView.value?.finish() },
-                    indication = null,
-                    interactionSource = remember { MutableInteractionSource() },
-                )
-                .semantics(mergeDescendants = true) { traversalIndex = -1.0f },
+                .semantics { traversalIndex = -1.0f },
         ) {
             Box(modifier = Modifier.align(Alignment.Center)) {
                 recognizerView.value?.Content()
@@ -159,8 +165,9 @@ private class VoiceInputActionWindow(
     }
 
     override fun close(): CloseResult {
-        inputTransaction.cancel()
-        runBlocking { initJob.cancelAndJoin() }
+        closed = true
+        inputTransaction.discardPartial()
+        initJob.cancel()
         recognizerView.value?.cancel()
         return CloseResult.Default
     }
@@ -174,7 +181,7 @@ private class VoiceInputActionWindow(
                 state.soundPlayer.playCancelSound()
                 cancelPlayed = true
             }
-            inputTransaction.cancel()
+            inputTransaction.discardPartial()
         }
     }
 
@@ -188,10 +195,12 @@ private class VoiceInputActionWindow(
     }
 
     override fun finished(result: String) {
+        if (closed || wasFinished) return
         wasFinished = true
         manager.getLifecycleScope().launch(Dispatchers.Main) {
+            if (closed) return@launch
             val sanitized = ModelOutputSanitizer.sanitize(result, inputTransaction.textContext)
-            inputTransaction.commit(sanitized)
+            if (sanitized.isBlank()) inputTransaction.discardPartial() else inputTransaction.commit(sanitized)
             manager.announce(result)
             manager.closeActionWindow()
         }
@@ -199,6 +208,7 @@ private class VoiceInputActionWindow(
 
     override fun partialResult(result: String) {
         manager.getLifecycleScope().launch(Dispatchers.Main) {
+            if (closed || wasFinished) return@launch
             val sanitized = ModelOutputSanitizer.sanitize(result, inputTransaction.textContext)
             inputTransaction.updatePartial(sanitized)
         }
@@ -212,7 +222,8 @@ private class VoiceInputActionWindow(
 }
 
 val VoiceInputAction = Action(
-    icon = R.drawable.mic_fill,
+    icon = R.drawable.openwispr_logo,
+    tintIcon = false,
     name = R.string.action_voice_input_title,
     simplePressImpl = null,
     keepScreenAwake = true,
