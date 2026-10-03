@@ -35,8 +35,6 @@ import org.futo.voiceinput.shared.types.MagnitudeState
 import org.futo.voiceinput.shared.ui.MicrophoneDeviceState
 import java.nio.ShortBuffer
 import kotlin.math.min
-import kotlin.math.pow
-import kotlin.math.sqrt
 
 private fun getRecordingDeviceKind(type: Int): String {
     return when (type) {
@@ -283,16 +281,17 @@ class AudioRecognizer(
         var numConsecutiveNonSpeech = 0
         var numConsecutiveSpeech = 0
 
-        val samples = ShortArray(1600)
+        // Meter syllables every 20 ms; 100 ms chunks lose consonants and short pauses.
+        val samples = ShortArray(SAMPLE_RATE_HZ / 50)
 
         while (isRecording) {
             yield()
-            val nRead = recorder.read(samples, 0, 1600, AudioRecord.READ_BLOCKING)
+            val nRead = recorder.read(samples, 0, samples.size, AudioRecord.READ_BLOCKING)
             if (nRead <= 0) break
             yield()
 
             val isRunningOutOfSpace =
-                (pcmSamples.remaining() < nRead.coerceAtLeast(1600)) && !expandSpaceIfAllowed()
+                (pcmSamples.remaining() < samples.size) && !expandSpaceIfAllowed()
 
             val hasNotTalkedRecently = hasTalked && (numConsecutiveNonSpeech > 66) && useVAD
             if (isRunningOutOfSpace || hasNotTalkedRecently) {
@@ -344,7 +343,7 @@ class AudioRecognizer(
                 numConsecutiveNonSpeech = 0
             }
 
-            val rms = sqrt(samples.sumOf { (it.toFloat() / Short.MAX_VALUE.toFloat()).pow(2).toDouble() } / samples.size).toFloat()
+            val rms = pcmRms(samples, nRead)
 
             if (startSoundPassed && ((rms > 0.01) || (numConsecutiveSpeech > 8))) {
                 hasTalked = true
@@ -362,7 +361,7 @@ class AudioRecognizer(
                 isMicBlocked = true
             }
 
-            val magnitude = (1.0f - 0.1f.pow(24.0f * rms))
+            val magnitude = speechLevel(rms)
 
             val state = if (hasTalked) {
                 MagnitudeState.TALKING
@@ -382,7 +381,7 @@ class AudioRecognizer(
             while (true) {
                 yield()
                 val nRead2 = recorder.read(
-                    samples, 0, 1600, AudioRecord.READ_NON_BLOCKING
+                    samples, 0, samples.size, AudioRecord.READ_NON_BLOCKING
                 )
                 if (nRead2 > 0) {
                     if (pcmSamples.remaining() < nRead2 && !expandSpaceIfAllowed()) {

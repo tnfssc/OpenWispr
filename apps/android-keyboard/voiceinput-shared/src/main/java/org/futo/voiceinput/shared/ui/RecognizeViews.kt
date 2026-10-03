@@ -1,6 +1,7 @@
 package org.futo.voiceinput.shared.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
@@ -27,6 +28,7 @@ import androidx.compose.runtime.MutableFloatState
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -124,6 +126,8 @@ fun InnerRecognize(
                     enabled = !processing,
                     role = Role.Button,
                     onClickLabel = finishLabel,
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
                     onClick = onFinish,
                 ).semantics { this.text = AnnotatedString(finishLabel) },
                 contentAlignment = Alignment.Center,

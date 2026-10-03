@@ -12,6 +12,17 @@ const processingDelay = Math.min(10000, Math.max(100, Number(params.get('process
 let state = 'idle', strength = 1.5, speed = 1, startTime = 0, envelope = 0, previousTime = 0;
 let processingStarted = 0, processingMix = 0;
 let timers = [], simulated = true;
+let speechHistory = [];
+const voiceAudio = new Audio('./voice-sample.wav');
+function delayedSpeech(time, delay) {
+  const target = time - delay;
+  for (let i = speechHistory.length - 2; i >= 0; i--) {
+    const [olderTime, older] = speechHistory[i];
+    const [newerTime, newer] = speechHistory[i + 1];
+    if (olderTime <= target) return older + (newer - older) * Math.min(1, (target - olderTime) / (newerTime - olderTime || 1));
+  }
+  return 0;
+}
 let noteBefore = '';
 const sample = 'Remind me to pick up coffee on the way home.';
 const partialTimeline = [
@@ -75,21 +86,23 @@ function setState(next) {
   }
 }
 function start() {
-  clearTimers(); simulated = true; startTime = performance.now(); setState('waiting');
+  clearTimers(); simulated = true; startTime = performance.now(); envelope = 0; speechHistory = []; setState('waiting');
+  voiceAudio.currentTime = 0;
+  if (params.has('sampleAudio')) voiceAudio.play().catch(() => {});
   later(() => setState('listening'), 1100);
   partialTimeline.forEach(([delay, text]) => later(() => renderDraft(text), delay));
 }
 function finish() {
   if (state === 'error') { start(); return; }
   if (!['waiting', 'listening'].includes(state)) return;
-  clearTimers(); setState('transcribing');
+  clearTimers(); voiceAudio.pause(); setState('transcribing');
   later(() => {
     $('note').value = (noteBefore ? `${noteBefore}\n\n` : '') + sample;
     setState('idle');
     $('start').focus({ preventScroll: true });
   }, processingDelay);
 }
-function cancel() { clearTimers(); setState('idle'); $('start').focus({ preventScroll: true }); }
+function cancel() { clearTimers(); voiceAudio.pause(); setState('idle'); $('start').focus({ preventScroll: true }); }
 $('start').addEventListener('click', start);
 $('finish').addEventListener('click', finish);
 $('cancel').addEventListener('click', cancel);
@@ -105,13 +118,13 @@ function animate(time) {
   const dt = Math.min((time - previousTime) / 1000 || .016, .1); previousTime = time;
   const elapsed = (time - startTime) / 1000;
   let target = 0;
-  if (state === 'waiting') target = .13;
   if (state === 'listening') {
-    // Speech-like bursts separated by quiet pauses, independent of the traveling wave.
-    const speech = Math.pow(Math.max(0, Math.sin(elapsed * 1.35)), .55);
-    target = simulated ? .16 + .84 * speech * (.7 + .3 * Math.sin(elapsed * 5.2) ** 2) : .9;
+    const sampleTime = simulated ? elapsed : elapsed % voiceFixture.duration;
+    target = voiceFixture.levels[Math.floor(sampleTime / voiceFixture.interval)] || 0;
   }
-  envelope += (target - envelope) * (1 - Math.exp(-dt / (target > envelope ? .09 : .24)));
+  envelope += (target - envelope) * (1 - Math.exp(-dt / (target > envelope ? .025 : .12)));
+  speechHistory.push([time / 1000, envelope]);
+  if (speechHistory.length > 32) speechHistory.shift();
   processingMix += ((state === 'transcribing' ? 1 : 0) - processingMix) * (1 - Math.exp(-dt / .12));
   pieces.forEach((piece) => {
     if (reducedMotion.matches || !['waiting', 'listening', 'transcribing'].includes(state)) {
@@ -119,8 +132,8 @@ function animate(time) {
     }
     const x = Number(piece.dataset.x);
     const gain = Number(piece.dataset.gain);
-    const phase = time / 1000 * 6.4 * speed - x * .023;
-    const speechAmount = Math.sin(phase) * envelope * strength;
+    const delay = Math.max(0, Math.min(1, (x - 83) / 241)) * .14;
+    const speechAmount = delayedSpeech(time / 1000, delay) * strength;
     // Processing has a steady left-to-right chase, rather than speech bursts.
     // The narrow crest lifts each piece in turn; a smooth mix preserves the
     // current pose when recording ends instead of snapping into another loop.
@@ -129,7 +142,7 @@ function animate(time) {
     const processingAmount = (pulse - .3) * strength * .85;
     const amount = speechAmount * (1 - processingMix) + processingAmount * processingMix;
     const energy = amount * gain;
-    // Each vector piece has its own anchor and phase. Strokes keep a constant
+    // Each vector piece follows real speech energy with a short delay. Strokes keep a constant
     // thickness; dots retain their shape and travel, while the end dash widens.
     if (piece.dataset.motion === 'dot') {
       const direction = Number(piece.dataset.direction || 1);
