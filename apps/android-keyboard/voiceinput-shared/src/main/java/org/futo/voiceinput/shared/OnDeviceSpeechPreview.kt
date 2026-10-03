@@ -36,7 +36,8 @@ class OnDeviceSpeechPreview(
         val read: ParcelFileDescriptor,
         val write: ParcelFileDescriptor.AutoCloseOutputStream,
     ) {
-        val chunks = Channel<ByteArray>(16)
+        // 1.6 seconds of 20 ms capture chunks, including recognition-service startup.
+        val chunks = Channel<ByteArray>(80)
         val transcript = PreviewTranscript()
         var writer: Job? = null
     }

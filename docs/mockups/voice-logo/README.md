@@ -13,14 +13,19 @@ error, and success states.
 
 The animated logo is rebuilt as 15 individual SVG strokes and dots, based on
 `apps/gnome/openwispr.png`. It contains no raster image or clipped image slices.
-Every piece has its own phase, amplitude, and anchor. Strokes grow and shrink
+Every piece has its own amplitude and anchor, and follows a slightly delayed
+speech envelope. Strokes grow and shrink
 independently with constant thickness; dots bob without stretching, and the
 trailing dash widens. Joined strokes share their connection point. The keyboard's
 voice button also uses the OpenWispr mark in place of the microphone icon.
-The default is expressive
-(strength 1.5), following the requested playful tone. Speech-like bursts and
-pauses drive an envelope with a 90 ms attack and 240 ms release. Quiet listening
-uses less motion. Transcription uses a distinct 1.4-second traveling pulse:
+The default is expressive (strength 1.5), following the requested playful tone.
+PCM from an offline synthesized voice sample drives the listening envelope,
+with a 25 ms attack and 120 ms release. Energy travels across the mark over
+140 ms. Silence settles to the original logo, and listening has no free-running
+sine loop. The Android meter reads 20 ms chunks and maps -60 to -18 dB into a
+usable range without saturating normal speech. The finish button has no press
+ripple or background highlight; keyboard focus in the HTML remains visible.
+Transcription uses a distinct 1.4-second traveling pulse:
 each piece expands and brightens in turn, then settles as the next picks up
 the rhythm. The switch from speech to processing blends smoothly. Processing
 keeps the logo at full overall opacity even while the finish button is disabled.
@@ -41,7 +46,10 @@ subtitles, and success messages are removed. Text insertion returns directly
 to the keyboard. The keyboard keys provide context and are decorative.
 
 This HTML is a simulated interaction, with no microphone capture or provider
-calls. The sample transcript is fixture text. The Android implementation renders
+calls. The sample transcript is fixture text. `voice-sample.wav` was generated
+with espeak; `voice.fixture.js` contains its measured 20 ms PCM energy. Add
+`sampleAudio=1` to hear the sample while the pieces react to it.
+The Android implementation renders
 the same shapes with Compose Canvas, drives listening motion from captured audio
 magnitude, and uses the traveling pulse while awaiting the configured provider.
 It respects the animation setting and Android's system animation scale.
@@ -56,12 +64,14 @@ The host editor controls composing-text appearance, so the muted text/fade in
 this HTML is illustrative. Real-device recognition and host-editor behavior
 still require device validation.
 
-The latest recording is `voice-logo-live-v4.mp4`, captured with
-agent-browser at 414 × 820, 30 fps. It demonstrates the individual vector
-pieces, minimal copy, live provisional words, the new processing pulse, and
-replacement with the final transcript.
-The recording uses `?presentation=1&processingDelay=6000` to show several
-processing cycles; the default simulated delay remains 1.6 seconds. Use the
+The latest recording is `voice-logo-speech-v5.mp4`, captured with agent-browser
+at 414 × 820, 60 fps. It demonstrates speech-driven motion and a finish tap without a
+rectangular highlight. Its narration is the same offline synthesized sample
+that drives the motion, added to the browser recording with ffmpeg.
+`voice-logo-live-v4.mp4` is the previously released animation.
+The latest recording uses `?presentation=1&sampleAudio=1&processingDelay=2500`.
+The default simulated delay remains 1.6 seconds. The v4 recording used
+`processingDelay=6000` to show several processing cycles. Use the
 “Transcribing” state in the tuning controls to inspect the loop indefinitely.
 `voice-logo-clean-v3.mp4` shows the previous processing animation.
 `voice-logo-pieces-v2.mp4` and `voice-logo-pieces-light-v2.mp4` show the previous

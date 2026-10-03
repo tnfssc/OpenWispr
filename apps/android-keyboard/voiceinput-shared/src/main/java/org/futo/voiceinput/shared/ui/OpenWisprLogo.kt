@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.isActive
+import org.futo.voiceinput.shared.SpeechWave
 import kotlin.math.PI
 import kotlin.math.exp
 import kotlin.math.min
@@ -70,7 +71,7 @@ private fun logoPieces() = listOf(
     stroke(324f, Pink, 1f, "M313 188H335", dash = true),
 )
 
-private data class Frame(val time: Float = 0f, val processingTime: Float = 0f, val envelope: Float = 0f, val mix: Float = 0f)
+private data class Frame(val speech: FloatArray = FloatArray(15), val processingTime: Float = 0f, val mix: Float = 0f)
 
 @Composable
 private fun systemMotionEnabled(): Boolean {
@@ -87,7 +88,7 @@ private fun systemMotionEnabled(): Boolean {
     return enabled
 }
 
-/** The approved mockup's individual vector pieces; stroke width stays constant as lengths change. */
+/** Individual vector pieces follow delayed speech energy, with no clock-driven listening loop. */
 @Composable
 fun OpenWisprLogo(modifier: Modifier, magnitude: Float = 0f, processing: Boolean = false, animated: Boolean = true) {
     val pieces = remember { logoPieces() }
@@ -98,27 +99,30 @@ fun OpenWisprLogo(modifier: Modifier, magnitude: Float = 0f, processing: Boolean
     LaunchedEffect(motion) {
         frame = Frame()
         if (!motion) return@LaunchedEffect
+        val speech = SpeechWave()
         var previous = 0L
         var wasProcessing = false
         while (isActive) withFrameNanos { now ->
             val dt = if (previous == 0L) 0f else min((now - previous) / 1_000_000_000f, .1f)
             previous = now
-            val target = if (currentProcessing) 0f else .13f + currentMagnitude.coerceIn(0f, 1f) * .87f
-            val envelope = frame.envelope + (target - frame.envelope) * (1f - exp(-dt / if (target > frame.envelope) .09f else .24f))
+            speech.advance(if (currentProcessing) 0f else currentMagnitude, dt)
             val mix = frame.mix + ((if (currentProcessing) 1f else 0f) - frame.mix) * (1f - exp(-dt / .12f))
             val processingTime = if (currentProcessing && !wasProcessing) 0f else frame.processingTime + dt
             wasProcessing = currentProcessing
-            frame = Frame(frame.time + dt, processingTime, envelope, mix)
+            val levels = FloatArray(pieces.size) { index ->
+                // The voice enters on the left, with a 140 ms ripple to the trailing dash.
+                speech.levelAt(((pieces[index].x - 83f) / 241f).coerceIn(0f, 1f) * .14f)
+            }
+            frame = Frame(levels, processingTime, mix)
         }
     }
     Canvas(modifier) {
         val factor = min(size.width, size.height) / 355f
         translate((size.width - 355f * factor) / 2f, (size.height - 355f * factor) / 2f) {
             scale(factor, factor, pivot = Offset.Zero) {
-                for (piece in pieces) {
-                    val phase = frame.time * 6.4f - piece.x * .023f
+                for ((index, piece) in pieces.withIndex()) {
                     val pulse = ((sin(frame.processingTime / 1.4f * PI.toFloat() * 2f - (piece.x - 83f) / 241f * PI.toFloat() * 1.6f) + 1f) / 2f).pow(3)
-                    val amount = sin(phase) * frame.envelope * 1.5f * (1f - frame.mix) + (pulse - .3f) * 1.5f * .85f * frame.mix
+                    val amount = frame.speech[index] * 1.5f * (1f - frame.mix) + (pulse - .3f) * 1.5f * .85f * frame.mix
                     val energy = amount * piece.gain
                     val alpha = 1f - frame.mix * .4f * (1f - pulse)
                     if (piece.path == null) {
