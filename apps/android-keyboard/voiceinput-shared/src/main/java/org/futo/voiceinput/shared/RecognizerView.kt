@@ -14,7 +14,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.LifecycleCoroutineScope
@@ -24,8 +23,6 @@ import org.futo.voiceinput.shared.types.Language
 import org.futo.voiceinput.shared.types.MagnitudeState
 import org.futo.voiceinput.shared.ui.InnerRecognize
 import org.futo.voiceinput.shared.ui.MicrophoneDeviceState
-import org.futo.voiceinput.shared.ui.PartialDecodingResult
-import org.futo.voiceinput.shared.ui.RecognizeLoadingCircle
 import org.futo.voiceinput.shared.ui.RecognizeMicError
 
 data class RecognizerViewSettings(
@@ -35,7 +32,8 @@ data class RecognizerViewSettings(
     val failureMessage: String,
 
     val transcriptionBackend: AudioTranscriptionBackend,
-    val recordingConfiguration: RecordingSettings
+    val recordingConfiguration: RecordingSettings,
+    val livePreview: AudioPreview? = null,
 )
 
 private val VerboseAnnotations = hashMapOf(
@@ -87,6 +85,7 @@ class RecognizerView(
     private val loadingCircleText = mutableStateOf("")
     private val partialDecodingText = mutableStateOf("")
     private val currentViewState = mutableStateOf(CurrentView.LoadingCircle)
+    private val processingState = mutableStateOf(false)
 
     private val currentDeviceState = mutableStateOf(MicrophoneDeviceState(
         bluetoothAvailable = false,
@@ -99,23 +98,14 @@ class RecognizerView(
     @Composable
     fun Content() {
         when (currentViewState.value) {
-            CurrentView.LoadingCircle -> {
-                Column {
-                    RecognizeLoadingCircle(text = loadingCircleText.value)
-                }
-            }
-
-            CurrentView.PartialDecodingResult -> {
-                Column {
-                    PartialDecodingResult(text = partialDecodingText.value)
-                }
-            }
-
-            CurrentView.InnerRecognize -> {
+            CurrentView.LoadingCircle, CurrentView.PartialDecodingResult, CurrentView.InnerRecognize -> {
                 InnerRecognize(
                     magnitude = magnitudeState,
                     state = statusState,
-                    device = currentDeviceState
+                    device = currentDeviceState,
+                    processing = processingState.value,
+                    animated = settings.shouldAnimateBubble,
+                    onFinish = ::finish,
                 )
             }
 
@@ -183,6 +173,7 @@ class RecognizerView(
 
 
         override fun decodingStatus(status: InferenceState) {
+            processingState.value = true
             val text = context.getString(
                 when (settings.shouldShowVerboseFeedback) {
                     true -> VerboseAnnotations[status]!!
@@ -195,6 +186,7 @@ class RecognizerView(
         }
 
         override fun loading() {
+            processingState.value = false
             loadingCircleText.value = context.getString(R.string.initializing)
             currentViewState.value = CurrentView.LoadingCircle
         }
@@ -228,6 +220,7 @@ class RecognizerView(
         }
 
         override fun processing() {
+            processingState.value = true
             loadingCircleText.value = context.getString(R.string.processing)
             currentViewState.value = CurrentView.LoadingCircle
         }
@@ -239,7 +232,8 @@ class RecognizerView(
         listener = audioRecognizerListener,
         settings = AudioRecognizerSettings(
             transcriptionBackend = settings.transcriptionBackend,
-            recordingConfiguration = settings.recordingConfiguration
+            recordingConfiguration = settings.recordingConfiguration,
+            livePreview = settings.livePreview,
         )
     )
 

@@ -11,6 +11,8 @@
 
     <!-- Appears when voice input is recording and speech is being actively detected. Must be fairly short. -->
     <string name="listening">Listening…</string>
+    <string name="transcribing">Transcribing…</string>
+    <string name="microphone_unavailable">Microphone unavailable</string>
 
     <!-- When the user is trying to use voice input but has not granted our app the Android microphone permission, we ask the user to please grant it to use voice input -->
     <string name="grant_microphone_permission_to_use_voice_input">Grant microphone permission to use Voice Input</string>

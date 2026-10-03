@@ -1,10 +1,5 @@
 package org.futo.voiceinput.shared.ui
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -28,22 +23,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableFloatState
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -55,7 +46,10 @@ import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import org.futo.voiceinput.shared.R
 import org.futo.voiceinput.shared.types.MagnitudeState
 import org.futo.voiceinput.shared.ui.theme.Typography
@@ -69,63 +63,7 @@ data class MicrophoneDeviceState(
 )
 
 @Composable
-fun AnimatedRecognizeCircle(magnitude: MutableFloatState = mutableFloatStateOf(0.5f)) {
-    val radius = animateValueChanges(magnitude.floatValue, 100)
-    val color = MaterialTheme.colorScheme.primaryContainer
-
-    val radiusMod = with(LocalDensity.current) {
-        80.dp.toPx()
-    }
-
-    Canvas(modifier = Modifier.fillMaxSize()) {
-        val drawRadius = radiusMod * (0.8f + radius * 2.0f)
-        drawCircle(color = color, radius = drawRadius)
-    }
-}
-
-@Composable
-private fun FakeToast(modifier: Modifier, message: String?) {
-    val visible = remember { mutableStateOf(false) }
-
-    LaunchedEffect(message) {
-        if(message != null) {
-            visible.value = true
-            delay(2500L)
-            visible.value = false
-        } else {
-            visible.value = false
-        }
-    }
-
-    if(message != null) {
-        AnimatedVisibility(
-            visible = visible.value,
-            modifier = modifier
-                .alpha(0.9f)
-                .background(MaterialTheme.colorScheme.surfaceDim, RoundedCornerShape(100))
-                .padding(16.dp),
-            enter = fadeIn(),
-            exit = fadeOut()
-        ) {
-            Box {
-                Text(message, modifier = Modifier.align(Alignment.Center), style = Typography.labelSmall, color = MaterialTheme.colorScheme.onSurface)
-            }
-        }
-    }
-}
-
-@Composable
 private fun BoxScope.BluetoothToggleIcon(device: MutableState<MicrophoneDeviceState>? = null) {
-    FakeToast(modifier = Modifier.align(Alignment.BottomCenter).offset(y = (-16).dp),
-        message = if(device?.value?.bluetoothActive == true) {
-            stringResource(R.string.using_bluetooth_mic, device.value.deviceName)
-        } else if(device?.value?.bluetoothAvailable == true || device?.value?.bluetoothPreferredByUser == true) {
-            stringResource(R.string.using_built_in_mic, device.value.deviceName)
-        } else {
-            null
-        }
-    )
-
     if(device?.value?.bluetoothAvailable == true) {
         val bluetoothColor = MaterialTheme.colorScheme.primary
         val iconColor = if(device.value.bluetoothActive) {
@@ -173,34 +111,39 @@ private fun BoxScope.BluetoothToggleIcon(device: MutableState<MicrophoneDeviceSt
 fun InnerRecognize(
     magnitude: MutableFloatState = mutableFloatStateOf(0.5f),
     state: MutableState<MagnitudeState> = mutableStateOf(MagnitudeState.MIC_MAY_BE_BLOCKED),
-    device: MutableState<MicrophoneDeviceState>? = null
+    device: MutableState<MicrophoneDeviceState>? = null,
+    processing: Boolean = false,
+    animated: Boolean = true,
+    onFinish: () -> Unit = {},
 ) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        AnimatedRecognizeCircle(magnitude = magnitude)
-
-        Icon(
-            painter = painterResource(R.drawable.mic_2_),
-            contentDescription = stringResource(R.string.stop_recording),
-            modifier = Modifier.size(48.dp),
-            tint = MaterialTheme.colorScheme.onPrimaryContainer
-        )
-
-        val text = when (state.value) {
-            MagnitudeState.NOT_TALKED_YET -> stringResource(R.string.try_saying_something)
-            MagnitudeState.MIC_MAY_BE_BLOCKED -> stringResource(R.string.no_audio_detected_is_your_microphone_blocked)
-            MagnitudeState.TALKING -> stringResource(R.string.listening)
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            val finishLabel = stringResource(R.string.stop_recording)
+            Box(
+                Modifier.size(160.dp, 136.dp).clickable(
+                    enabled = !processing,
+                    role = Role.Button,
+                    onClickLabel = finishLabel,
+                    onClick = onFinish,
+                ).semantics { this.text = AnnotatedString(finishLabel) },
+                contentAlignment = Alignment.Center,
+            ) {
+                OpenWisprLogo(Modifier.size(132.dp), magnitude.floatValue, processing, animated)
+            }
+            Text(
+                when {
+                    processing -> stringResource(R.string.transcribing)
+                    state.value == MagnitudeState.MIC_MAY_BE_BLOCKED -> stringResource(R.string.microphone_unavailable)
+                    else -> stringResource(R.string.listening)
+                },
+                modifier = Modifier.padding(top = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                fontSize = 17.sp,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
         }
 
-        Text(
-            text,
-            modifier = Modifier
-                .fillMaxWidth()
-                .offset(x = 0.dp, y = 48.dp),
-            textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-
-        BluetoothToggleIcon(device)
+        if (!processing) BluetoothToggleIcon(device)
     }
 }
 

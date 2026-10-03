@@ -1,0 +1,63 @@
+/* Hallmark · component: voice input · genre: modern-minimal · theme: existing OpenWispr
+ * pre-emit critique: P5 H4 E5 S5 R5 V4
+ * states: default · hover · focus · active · disabled · loading · error · success
+ */
+:root {
+  color-scheme: dark;
+  --color-paper: oklch(21% .035 265);
+  --color-panel: oklch(20.8% .04 266);
+  --color-key: oklch(26% .045 266);
+  --color-key-hover: oklch(33% .045 266);
+  --color-ink: oklch(98% .005 250);
+  --color-muted: oklch(77% .015 250);
+  --color-rule: oklch(34% .025 260);
+  --color-accent: oklch(75% .11 255);
+  --color-accent-ink: oklch(22% .055 255);
+  --color-focus: oklch(85% .12 90);
+  --color-error: oklch(78% .13 25);
+  --color-success: oklch(78% .12 165);
+  --color-clear: transparent;
+  --color-logo-blue: #3024ed;
+  --color-logo-coral: #ff7049;
+  --color-logo-yellow: #ffdc35;
+  --color-logo-green: #2ecb98;
+  --color-logo-pink: #f23c91;
+  --logo-size: 132px;
+  --logo-stroke: 7.8px;
+  --font-display: 'Roboto', 'Arial', sans-serif;
+  --font-body: 'Roboto', 'Arial', sans-serif;
+  --font-mono: ui-monospace, monospace;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --text-small: 12px;
+  --text-body: 14px;
+  --text-title: 24px;
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-pill: 999px;
+  --rule-width: 1px;
+  --ease-out: cubic-bezier(.16, 1, .3, 1);
+  --ease-in: cubic-bezier(.7, 0, .84, 0);
+  --ease-in-out: cubic-bezier(.65, 0, .35, 1);
+  --dur-press: 100ms;
+  --dur-short: 150ms;
+  --dur-medium: 250ms;
+}
+:root[data-theme='light'] {
+  color-scheme: light;
+  --color-paper: oklch(99% .004 255);
+  --color-panel: oklch(96% .007 255);
+  --color-key: oklch(100% 0 0);
+  --color-key-hover: oklch(92% .015 255);
+  --color-ink: oklch(23% .025 265);
+  --color-muted: oklch(47% .025 260);
+  --color-rule: oklch(82% .015 260);
+  --color-accent: oklch(43% .16 260);
+  --color-accent-ink: oklch(99% 0 0);
+  --color-focus: oklch(43% .16 260);
+  --color-error: oklch(43% .17 25);
+  --color-success: oklch(39% .1 165);
+}

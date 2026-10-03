@@ -558,7 +558,7 @@ fun LazyItemScope.ActionItem(idx: Int, action: Action, onSelect: (Action) -> Uni
         Icon(
             painter = painterResource(id = action.icon),
             contentDescription = stringResource(action.name),
-            tint = contentCol,
+            tint = if (action.tintIcon) contentCol else Color.Unspecified,
             modifier = Modifier.size(20.dp),
         )
     }
@@ -595,7 +595,7 @@ fun ActionItemSmall(action: Action, onSelect: (Action) -> Unit, onLongSelect: (A
         Icon(
             painter = painterResource(id = action.icon),
             contentDescription = stringResource(action.name),
-            tint = fgCol,
+            tint = if (action.tintIcon) fgCol else Color.Unspecified,
             modifier = Modifier.size(16.dp)
         )
     }

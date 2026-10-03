@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenWispr — voice logo preview</title>
+  <link rel="stylesheet" href="./voice.css">
+</head>
+<body>
+<div class="layout">
+  <main class="app" aria-label="Dictation preview">
+    <header class="note-header"><h1>New note</h1><button class="mobile-tune" id="tune">Tune</button></header>
+    <div class="note">
+      <textarea id="note" aria-label="Note" spellcheck="false"></textarea>
+      <div id="live-note" class="live-note" role="textbox" aria-label="Note, provisional dictation" aria-readonly="true" hidden><span id="saved-note"></span><span id="draft-text" class="draft-text"></span></div>
+    </div>
+    <section class="keyboard" aria-label="OpenWispr keyboard" data-state="idle">
+      <div class="keyboard-header">
+        <div class="brand"><img src="./openwispr.png" alt=""><span>OpenWispr</span></div>
+        <button id="start" class="icon-button" aria-label="Start dictation"><img src="./openwispr.png" alt=""></button>
+        <button id="cancel" class="icon-button" aria-label="Cancel dictation" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <div class="keys" id="keys" aria-hidden="true">
+        <div class="key-row"><span class="key">q</span><span class="key">w</span><span class="key">e</span><span class="key">r</span><span class="key">t</span><span class="key">y</span><span class="key">u</span><span class="key">i</span><span class="key">o</span><span class="key">p</span></div>
+        <div class="key-row"><span class="key">a</span><span class="key">s</span><span class="key">d</span><span class="key">f</span><span class="key">g</span><span class="key">h</span><span class="key">j</span><span class="key">k</span><span class="key">l</span></div>
+        <div class="key-row"><span class="key wide">⇧</span><span class="key">z</span><span class="key">x</span><span class="key">c</span><span class="key">v</span><span class="key">b</span><span class="key">n</span><span class="key">m</span><span class="key wide">⌫</span></div>
+        <div class="key-row"><span class="key wide">?123</span><span class="key">,</span><span class="key space">English</span><span class="key">.</span><span class="key wide">↵</span></div>
+      </div>
+      <div id="voice" class="voice" hidden>
+        <button id="finish" class="logo-button" aria-label="Finish dictation">
+          <svg class="logo" viewBox="0 0 355 355" aria-hidden="true">
+            <g class="wave-piece coral" data-x="125" data-anchor="188" data-motion="stroke" data-gain="0.85"><path class="stroke" d="M125 156V188"/></g>
+            <g class="wave-piece blue" data-x="83" data-anchor="188" data-motion="stroke" data-gain="1.4"><path class="stroke" d="M24 188H62V162C62 142 93 142 93 162V203C93 228 125 228 125 203V188"/></g>
+            <g class="wave-piece blue" data-x="83" data-motion="dot" data-direction="-1" data-gain="1.1"><circle cx="83" cy="114" r="13"/></g>
+            <g class="wave-piece coral" data-x="125" data-motion="dot" data-direction="-1" data-gain="0.8"><circle cx="125" cy="130" r="10.5"/></g>
+            <g class="wave-piece coral" data-x="153" data-anchor="58" data-motion="stroke" data-gain="0.7"><path class="stroke" d="M153 253V72Q153 58 167 58"/></g>
+            <g class="wave-piece yellow" data-x="181" data-anchor="58" data-motion="stroke" data-gain="0.8"><path class="stroke" d="M167 58Q181 58 181 72V239"/></g>
+            <g class="wave-piece coral" data-x="153" data-motion="dot" data-follow-span="195" data-follow-gain="0.7" data-gain="0.3"><circle cx="153" cy="284" r="10.5"/></g>
+            <g class="wave-piece green" data-x="226" data-anchor="188" data-motion="stroke" data-gain="0.65"><path class="stroke" d="M210 309V133C210 108 243 108 243 133V188"/></g>
+            <g class="wave-piece pink" data-x="243" data-anchor="188" data-motion="stroke" data-gain="1"><path class="stroke" d="M243 188V264"/></g>
+            <g class="wave-piece blue" data-x="243" data-motion="dot" data-gain="0"><circle cx="243" cy="188" r="10.5"/></g>
+            <g class="wave-piece green" data-x="278" data-anchor="188" data-motion="stroke" data-gain="1.5"><path class="stroke" d="M278 158V188"/></g>
+            <g class="wave-piece pink" data-x="278" data-anchor="188" data-motion="stroke" data-gain="1.2"><path class="stroke" d="M278 188V212"/></g>
+            <g class="wave-piece green" data-x="278" data-motion="dot" data-direction="-1" data-gain="1.1"><circle cx="278" cy="127" r="10.5"/></g>
+            <g class="wave-piece pink" data-x="278" data-motion="dot" data-gain="1.1"><circle cx="278" cy="242" r="10.5"/></g>
+            <g class="wave-piece pink" data-x="324" data-anchor="188" data-motion="dash" data-gain="1"><path class="stroke" d="M313 188H335"/></g>
+          </svg>
+        </button>
+        <div id="status" class="status" role="status" aria-live="polite">Listening…</div>
+      </div>
+    </section>
+  </main>
+  <aside class="review" id="review" aria-label="Prototype controls">
+    <h2>Voice logo preview</h2>
+    <p>Simulated speech and live text.</p>
+    <label class="control"><span>Wave strength <output id="strength-value">Expressive</output></span><input id="strength" type="range" min="0.3" max="1.8" step="0.1" value="1.5"></label>
+    <label class="control"><span>Wave speed <output id="speed-value">1×</output></span><input id="speed" type="range" min="0.5" max="1.5" step="0.1" value="1"></label>
+    <label class="control"><span>Appearance</span><select id="theme"><option value="dark">Dark</option><option value="light">Light</option></select></label>
+    <label class="control"><span>Preview state</span><select id="state-picker"><option value="idle">Keyboard / idle</option><option value="waiting">Waiting for speech</option><option value="listening">Speaking</option><option value="transcribing">Transcribing</option><option value="success">Success</option><option value="error">Error / retry</option><option value="disabled">Microphone unavailable</option></select></label>
+    <button class="review-button primary" id="replay">Replay</button>
+    <button class="review-button" id="reset">Clear note</button>
+    <a href="./voice.preview.html">Component states</a>
+  </aside>
+</div>
+<script src="./voice.js"></script>
+</body>
+</html>
