@@ -303,6 +303,8 @@ Note: the GitHub Release companion binaries are built with `CGO_ENABLED=0` for p
 
 ## Configuration
 
+Open extension preferences, edit your settings, then click **Save** at the top of the page. This saves all fields, including API keys, without needing to press Enter. Invalid endpoints or silence thresholds are highlighted and must be corrected before saving. In the cleanup prompt editor, click **Done**, then **Save** in preferences. Closing preferences discards unsaved changes.
+
 The extension does not ship with default recording shortcuts. Configure them in preferences, with `dconf-editor`, or by modifying the schema:
 *   **Schema**: `org.gnome.shell.extensions.openwispr`
 *   **Key**: `toggle-recording`
@@ -345,6 +347,12 @@ Remote STT and LLM keys/endpoints are configurable in extension preferences. Rel
 > **Security:** API keys are stored in plaintext in GSettings/dconf (`~/.config/dconf/user`). Do not use shared or production keys. Restrict dconf access accordingly.
 
 ## Testing
+
+Preferences Save regression test (requires GJS, GTK4, libadwaita and a display; uses an isolated memory settings backend):
+
+```bash
+gjs -m test_preferences.js
+```
 
 LLM cleanup unit tests (request payload + response parsing):
 

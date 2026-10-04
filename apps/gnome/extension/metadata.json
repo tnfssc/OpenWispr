@@ -1,7 +1,7 @@
 {
   "uuid": "openwispr-gnome-extension@tnfssc.github.com",
   "name": "openwispr-gnome-extension",
-  "version": 5,
+  "version": 6,
   "description": "AI-powered voice-to-text dictation for GNOME. Requires the openwispr companion engine service for recording/transcription. Uses configurable clipboard-based text insertion. Optional remote STT/LLM requests are sent only to user-configured providers.",
   "settings-schema": "org.gnome.shell.extensions.openwispr",
   "shell-version": ["45", "46", "47", "48", "49", "50"],

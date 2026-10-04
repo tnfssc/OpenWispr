@@ -16,9 +16,35 @@ const MULTILINE_MIN_CONTENT_HEIGHT = 300;
 export default class OpenWisprPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings();
+        // Keep switches, shortcuts and dialog edits local until Save is clicked.
+        settings.delay();
+        this._textSettings = [];
+        this._spinRows = [];
 
         const page = new Adw.PreferencesPage();
         window.add(page);
+
+        const saveGroup = new Adw.PreferencesGroup();
+        this._saveRow = new Adw.ActionRow({
+            title: _('Settings'),
+            subtitle: _('Click Save to apply changes. Closing this window discards unsaved changes.'),
+        });
+        const saveButton = new Gtk.Button({
+            label: _('Save'),
+            css_classes: ['suggested-action'],
+            valign: Gtk.Align.CENTER,
+        });
+        saveButton.connect('clicked', () => this._saveSettings(window, settings));
+        this._saveRow.add_suffix(saveButton);
+        this._saveRow.activatable_widget = saveButton;
+        saveGroup.add(this._saveRow);
+        page.add(saveGroup);
+        const changedId = settings.connect('changed', () => this._markUnsaved());
+        window.connect('close-request', () => {
+            settings.disconnect(changedId);
+            settings.revert();
+            return false;
+        });
 
         const companionGroup = new Adw.PreferencesGroup({
             title: _('Companion Setup'),
@@ -162,18 +188,9 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
             title: _('Silence Threshold'),
             text: settings.get_string('silence-threshold'),
         });
-        // Validate the ffmpeg threshold format before persisting. Use the
-        // `apply` signal (fires on Enter / focus-out) so we don't hammer dconf
-        // on every keystroke.
-        silenceThresholdRow.connect('apply', () => {
-            const value = silenceThresholdRow.text.trim();
-            if (!/^-?\d+(\.\d+)?dB$/.test(value)) {
-                silenceThresholdRow.add_css_class('error');
-                return;
-            }
-            silenceThresholdRow.remove_css_class('error');
-            settings.set_string('silence-threshold', value);
-        });
+        this._registerTextSetting(silenceThresholdRow, 'silence-threshold',
+            value => /^-?\d+(\.\d+)?dB$/.test(value),
+            _('Silence Threshold must be a number followed by dB, for example -35dB.'));
         audioGroup.add(silenceThresholdRow);
 
         const silenceDurationAdjustment = new Gtk.Adjustment({
@@ -183,8 +200,7 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
             page_increment: 0.1,
             value: settings.get_double('silence-duration'),
         });
-        // The adjustment clamps the stored value into [0.05, 5.0]; write the
-        // clamped value back so GSettings never holds a stale out-of-range number.
+        // Stage any clamped value along with the other settings.
         if (settings.get_double('silence-duration') !== silenceDurationAdjustment.value)
             settings.set_double('silence-duration', silenceDurationAdjustment.value);
         const silenceDurationRow = new Adw.SpinRow({
@@ -193,6 +209,7 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
             digits: 2,
         });
         silenceDurationRow.connect('notify::value', () => settings.set_double('silence-duration', silenceDurationRow.value));
+        this._spinRows.push(silenceDurationRow);
         audioGroup.add(silenceDurationRow);
 
         const sttGroup = new Adw.PreferencesGroup({ title: _('Speech to Text') });
@@ -348,25 +365,65 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         );
     }
 
+    _markUnsaved() {
+        this._saveRow.subtitle = _('Unsaved changes. Click Save to apply.');
+    }
+
+    _registerTextSetting(widget, key, validate = () => true, error = '') {
+        this._textSettings.push({ widget, key, validate, error });
+        widget.connect('notify::text', () => {
+            widget.remove_css_class('error');
+            this._markUnsaved();
+        });
+    }
+
+    _saveSettings(window, settings) {
+        // Read even the currently focused field; no Enter/focus-out is needed.
+        const edits = this._textSettings.map(edit => ({
+            ...edit,
+            value: edit.widget.text.trim(),
+        }));
+        let invalidEdit = null;
+        for (const edit of edits) {
+            if (!edit.validate(edit.value)) {
+                edit.widget.add_css_class('error');
+                invalidEdit ??= edit;
+            } else {
+                edit.widget.remove_css_class('error');
+            }
+        }
+        if (invalidEdit) {
+            this._saveRow.subtitle = _('Settings were not saved. Fix the highlighted fields and click Save.');
+            window.add_toast(new Adw.Toast({ title: invalidEdit.error }));
+            invalidEdit.widget.grab_focus();
+            return;
+        }
+
+        for (const edit of edits) {
+            if (settings.get_string(edit.key) !== edit.value &&
+                !settings.set_string(edit.key, edit.value)) {
+                this._saveRow.subtitle = _('Settings were not saved. A setting could not be written.');
+                window.add_toast(new Adw.Toast({ title: this._saveRow.subtitle }));
+                return;
+            }
+        }
+        for (const row of this._spinRows)
+            row.update();
+        settings.apply();
+        Gio.Settings.sync();
+        this._saveRow.subtitle = _('Settings saved.');
+        window.add_toast(new Adw.Toast({ title: _('Settings saved.') }));
+    }
+
     _addEntryRow(group, settings, key, title) {
         const row = new Adw.EntryRow({
             title,
             text: settings.get_string(key),
         });
         const isEndpoint = key.endsWith('-endpoint');
-        // Use the `apply` signal (libadwaita 1.2+, fires on Enter / focus-out)
-        // so we write to dconf once per committed edit instead of on every
-        // keystroke. Trim whitespace and, for endpoint keys, require an
-        // http(s) scheme so a malformed URL can't silently break the pipeline.
-        row.connect('apply', () => {
-            const value = row.text.trim();
-            if (isEndpoint && value && !/^https?:\/\//i.test(value)) {
-                row.add_css_class('error');
-                return;
-            }
-            row.remove_css_class('error');
-            settings.set_string(key, value);
-        });
+        this._registerTextSetting(row, key,
+            value => !isEndpoint || !value || /^https?:\/\//i.test(value),
+            _('Endpoint URLs must start with http:// or https://.'));
         group.add(row);
         return row;
     }
@@ -380,14 +437,7 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
             valign: Gtk.Align.CENTER,
             width_chars: 24,
         });
-        // Gtk.PasswordEntry has no `apply` signal; commit on Enter and on
-        // focus-out instead of every keystroke. Trim whitespace so a stray
-        // newline or space can't silently invalidate the API key.
-        const commit = () => settings.set_string(key, entry.text.trim());
-        entry.connect('activate', commit);
-        const focusController = new Gtk.EventControllerFocus();
-        focusController.connect('leave', commit);
-        entry.add_controller(focusController);
+        this._registerTextSetting(entry, key);
 
         row.add_suffix(entry);
         row.activatable_widget = entry;
@@ -464,7 +514,7 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         cancelButton.connect('clicked', () => dialog.close());
 
         const saveButton = new Gtk.Button({
-            label: _('Save'),
+            label: _('Done'),
             css_classes: ['suggested-action'],
         });
         saveButton.connect('clicked', () => {
