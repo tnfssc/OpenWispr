@@ -1,5 +1,7 @@
 # Small dictation UX features
 
+Research snapshot. The later implementation is recorded in [recovery and onboarding](recovery-onboarding.md).
+
 ## Brief and result
 
 The user asked for competitor research, not implementation. Small features only. User experience comes first. No application code changed.
@@ -79,6 +81,6 @@ Research workers task_43203556 and task_66822c4f completed. Both were read-only 
 Current checkout: /home/tnfssc/.t3/worktrees/OpenWispr/t3-300cd7f4
 Branch: t3/competitor-ux-research
 
-No code, build, or release work was requested. No commits or pushes were made. These wisdom files are local and uncommitted. Pre-existing dirty Android submodules were left alone.
+At the research handoff, no code, build, or release work was requested. No commits or pushes had been made and the wisdom files were local and uncommitted. The later implementation saved this research in b196d37c8. Pre-existing dirty Android submodules were left alone.
 
 The wisdom folder and values file were absent. Created a small values set from this brief and existing provider/architecture docs: easy dictation over bloat, honest remote-processing disclosure, and shared flow without forced platform parity. No prior lessons were invented. This pass adds no further recurring rule.

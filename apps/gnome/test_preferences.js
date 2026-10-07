@@ -135,13 +135,14 @@ try {
     const apiXML = '<node><interface name="org.gnome.Shell.Extensions.OpenWispr"><method name="TestStart"><arg type="s" direction="in"/><arg type="b" direction="out"/></method><method name="TestStop"><arg type="s" direction="in"/><arg type="b" direction="out"/></method><method name="TestCancel"><arg type="s" direction="in"/><arg type="b" direction="out"/></method><signal name="TestState"><arg type="s"/><arg type="s"/><arg type="s"/><arg type="s"/></signal></interface></node>';
     let startCalls = 0;
     let stopCalls = 0;
+    let deferStopResult = false;
     const emitState = (session, state, text = '') => GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
         mock.emit_signal('TestState', new GLib.Variant('(ssss)', [session, state, text, '']));
         return GLib.SOURCE_REMOVE;
     });
     const mock = Gio.DBusExportedObject.wrapJSObject(apiXML, {
         TestStart: session => { startCalls++; emitState(session, 'recording'); return true; },
-        TestStop: session => { stopCalls++; emitState(session, 'result', 'This is my first dictation.'); return true; },
+        TestStop: session => { stopCalls++; emitState(session, deferStopResult ? 'processing' : 'result', deferStopResult ? '' : 'This is my first dictation.'); return true; },
         TestCancel: session => { emitState(session, 'idle'); return true; },
     });
     mock.export(conn, '/org/gnome/Shell/Extensions/OpenWispr');
@@ -168,9 +169,24 @@ try {
     await waitFor(() => prefs._testStopButton.sensitive);
     assert(startCalls === 2 && !prefs._testStartButton.sensitive && prefs._testCancelButton.sensitive, 'Actual test Start requests recording and exposes Cancel');
     assert(!prefs._setupNext.sensitive, 'Recording is not successful completion');
+    deferStopResult = true;
+    const processingSession = prefs._setupTestSession;
+    prefs._testStopButton.emit('clicked');
+    await waitFor(() => prefs._testBusy && !prefs._testStopButton.sensitive);
+    prefs._setupBack.emit('clicked');
+    await new Promise(resolve => GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => { resolve(); return GLib.SOURCE_REMOVE; }));
+    prefs._setupNext.emit('clicked');
+    assert(prefs._setupStep === 3 && prefs._testStartButton.sensitive && !prefs._testStopButton.sensitive, 'Back during processing resets controls even after hidden cancellation completes');
+    emitState(processingSession, 'result', 'Late processed words');
+    await new Promise(resolve => GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => { resolve(); return GLib.SOURCE_REMOVE; }));
+    assert(!prefs._setupTestPassed && !prefs._setupNext.sensitive, 'A late processed result cannot finish reopened setup');
+    deferStopResult = false;
+    prefs._testStartButton.emit('clicked');
+    await waitFor(() => prefs._testStopButton.sensitive);
+    assert(startCalls === 3, 'A fresh test starts after abandoning processing');
     prefs._testStopButton.emit('clicked');
     await waitFor(() => prefs._setupTestPassed);
-    assert(stopCalls === 1 && prefs._testResult.label === 'This is my first dictation.', 'Actual Stop response shows a selectable result');
+    assert(stopCalls === 2 && prefs._testResult.label === 'This is my first dictation.', 'Actual Stop response shows a selectable result');
     assert(prefs._testCopyButton.sensitive && prefs._setupNext.sensitive, 'Success enables deliberate Copy and Finish');
     prefs._setupNext.emit('clicked');
     assert(saved.get_boolean('setup-completed') && saved.get_int('setup-step') === 0, 'Finish saves completion and clears resume step');

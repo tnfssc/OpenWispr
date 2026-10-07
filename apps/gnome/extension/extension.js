@@ -153,6 +153,7 @@ class OpenWisprController {
         this._indicator.menu.addMenuItem(this._savedItem);
         this._retryItem = this._indicator.menu.addAction(_('Retry oldest · copy result'), () => this._retrySavedAudio());
         this._discardItem = this._indicator.menu.addAction(_('Discard oldest saved audio'), () => this._discardSavedAudio());
+        this._savedItem.visible = this._retryItem.visible = this._discardItem.visible = false;
         this._indicator.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         this._indicator.menu.addAction(_('Set up dictation…'), () => {
             this._settings.set_boolean('setup-requested', true);
@@ -960,17 +961,19 @@ class OpenWisprController {
         this._cancelItem.visible = Boolean(this._pendingTranscription || this._awaitingTranscriptionToken);
         this._retryItem.setSensitive(false);
         this._discardItem.setSensitive(false);
+        this._retryItem.visible = this._discardItem.visible = false;
         const proxy = this._getCompanionProxy();
-        if (!proxy) { this._savedItem.label.text = _('Companion unavailable · reopen to check saved audio'); return; }
+        if (!proxy) { this._savedItem.visible = true; this._savedItem.label.text = _('Companion unavailable · reopen to check saved audio'); return; }
         proxy.call('RecoveryStatus', null, Gio.DBusCallFlags.NONE, COMPANION_START_TIMEOUT_MS, null, (p, res) => {
             if (!this._enabled) return;
             try {
                 const [count] = p.call_finish(res).deep_unpack();
                 this._savedItem.label.text = count ? _('Saved audio on this device: ') + count : _('No saved audio');
                 const idle = !this._recording && !this._processing;
+                this._savedItem.visible = this._retryItem.visible = this._discardItem.visible = count > 0 && idle;
                 this._retryItem.setSensitive(count > 0 && idle);
                 this._discardItem.setSensitive(count > 0 && idle);
-            } catch (e) { this._savedItem.label.text = _('Could not check saved audio · check companion service'); }
+            } catch (e) { this._savedItem.visible = true; this._savedItem.label.text = _('Could not check saved audio · check companion service'); }
         });
     }
 

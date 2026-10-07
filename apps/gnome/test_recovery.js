@@ -84,3 +84,23 @@ test('a stale preferences window cannot stop or cancel a newer safe test', () =>
  assert.equal(f.c.TestStop('old-session'), false); assert.equal(f.c.TestCancel('old-session'), false);
  assert.equal(f.calls.length, 1); assert.equal(f.c._testActive, true);
 });
+
+for (const count of [0, 2]) {
+    test(`recovery controls only appear for saved audio: count ${count}`, () => {
+        const f = fixture();
+        const item = () => ({visible: false, label: {text: ''}, setSensitive(value) {this.sensitive = value;}});
+        f.c._recordItem = item(); f.c._cancelItem = item(); f.c._savedItem = item();
+        f.c._retryItem = item(); f.c._discardItem = item();
+        Object.getPrototypeOf(f.c)._refreshRecovery.call(f.c);
+        const status = f.calls.find(call => call.method === 'RecoveryStatus');
+        status.done(f.proxy, [count]);
+        for (const name of ['_savedItem', '_retryItem', '_discardItem']) {
+            assert.equal(f.c[name].visible, count > 0, name);
+        }
+        f.c._processing = true;
+        Object.getPrototypeOf(f.c)._refreshRecovery.call(f.c);
+        f.calls.findLast(call => call.method === 'RecoveryStatus').done(f.proxy, [count]);
+        assert.equal(f.c._retryItem.visible, false, 'No recovery controls during current processing');
+        assert.equal(f.c._discardItem.visible, false);
+    });
+}
