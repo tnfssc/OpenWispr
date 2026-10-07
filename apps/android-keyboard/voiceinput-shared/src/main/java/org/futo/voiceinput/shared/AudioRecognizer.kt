@@ -496,11 +496,9 @@ class AudioRecognizer(
         }
 
         yield()
-        lifecycleScope.launch {
-            withContext(Dispatchers.Main) {
-                yield()
-                listener.finished(outputText)
-            }
+        withContext(Dispatchers.Main) {
+            yield()
+            listener.finished(outputText)
         }
     }
 

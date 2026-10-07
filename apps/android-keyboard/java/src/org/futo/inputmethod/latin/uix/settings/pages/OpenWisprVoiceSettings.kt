@@ -29,6 +29,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.futo.inputmethod.latin.R
+import org.futo.inputmethod.latin.openwispr.FailedSpeechStore
+import org.futo.inputmethod.latin.openwispr.SpeechRecoveryControls
 import org.futo.inputmethod.latin.openwispr.OpenWisprConfig
 import org.futo.inputmethod.latin.openwispr.OpenWisprConfigStore
 import org.futo.inputmethod.latin.openwispr.OpenWisprProvider
@@ -56,54 +58,74 @@ private fun OpenWisprSpeechSettings() {
     var config by remember { mutableStateOf(OpenWisprConfigStore.load(context)) }
     var saved by remember { mutableStateOf(false) }
 
+    val setupStore = remember { VoiceSetupStore(context) }
+    var progress by remember { mutableStateOf(setupStore.load(config.isConfigured)) }
+    val update: (org.futo.inputmethod.latin.openwispr.VoiceSetupProgress) -> Unit = {
+        progress = it
+        setupStore.save(it)
+    }
+    val failedSpeech = remember { FailedSpeechStore(context.noBackupFilesDir) }
+    var recovery by remember { mutableStateOf(failedSpeech.exists()) }
+
     SettingsForm {
-        NetworkDisclosure(config.secureStorageAvailable)
-        ProviderPicker(
-            title = "Speech provider",
-            selected = config.provider,
-            onSelect = { config = config.copy(provider = it); saved = false },
-        )
-        ProviderOnboarding(config.provider)
-        SecretField(
-            value = config.keyFor(config.provider),
-            label = "${config.provider.displayName} API key",
-            onValueChange = {
-                config = when (config.provider) {
-                    OpenWisprProvider.GROQ -> config.copy(groqApiKey = it)
-                    OpenWisprProvider.OPEN_ROUTER -> config.copy(openRouterApiKey = it)
+        VoiceSetupHeader(progress, update)
+        if (progress.active && progress.step == 1) {
+            VoiceSetupMicrophone { update(progress.next(true)) }
+        } else if (progress.active && progress.step == 2) {
+            VoiceSetupTest(progress, update, onSettings = { update(progress.copy(step = 0)) },
+                onRecoveryChanged = { recovery = it })
+        }
+        if (recovery && !(progress.active && progress.step == 2)) {
+            SpeechRecoveryControls(failedSpeech, onResolved = { recovery = false },
+                onSettings = { update(progress.copy(active = true, step = 0)) })
+        }
+        if (!progress.active || progress.step == 0) {
+            NetworkDisclosure(config)
+            ProviderPicker(
+                title = "Speech provider",
+                selected = config.provider,
+                onSelect = { config = config.copy(provider = it); saved = false },
+            )
+            ProviderOnboarding(config.provider)
+            SecretField(
+                value = config.keyFor(config.provider),
+                label = "${config.provider.displayName} API key",
+                onValueChange = {
+                    config = when (config.provider) {
+                        OpenWisprProvider.GROQ -> config.copy(groqApiKey = it)
+                        OpenWisprProvider.OPEN_ROUTER -> config.copy(openRouterApiKey = it)
+                    }
+                    saved = false
+                },
+            )
+            OutlinedTextField(
+                value = config.modelFor(config.provider),
+                onValueChange = {
+                    config = when (config.provider) {
+                        OpenWisprProvider.GROQ -> config.copy(groqModel = it)
+                        OpenWisprProvider.OPEN_ROUTER -> config.copy(openRouterModel = it)
+                    }
+                    saved = false
+                },
+                label = { Text("Transcription model") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = config.language,
+                onValueChange = { config = config.copy(language = it); saved = false },
+                label = { Text("Language code") },
+                supportingText = { Text("Blank detects language automatically. Example: en, es, ar") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Button(enabled = config.isConfigured, modifier = Modifier.fillMaxWidth(), onClick = {
+                scope.launch {
+                    withContext(Dispatchers.IO) { OpenWisprConfigStore.save(context, config) }
+                    saved = true
+                    if (progress.active) update(progress.providerSaved())
                 }
-                saved = false
-            },
-        )
-        OutlinedTextField(
-            value = config.modelFor(config.provider),
-            onValueChange = {
-                config = when (config.provider) {
-                    OpenWisprProvider.GROQ -> config.copy(groqModel = it)
-                    OpenWisprProvider.OPEN_ROUTER -> config.copy(openRouterModel = it)
-                }
-                saved = false
-            },
-            label = { Text("Transcription model") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            value = config.language,
-            onValueChange = { config = config.copy(language = it); saved = false },
-            label = { Text("Language code") },
-            supportingText = { Text("Blank detects language automatically. Example: en, es, ar") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        SaveButton(
-            saved = saved,
-            enabled = config.apiKey.isNotBlank() && config.model.isNotBlank(),
-        ) {
-            scope.launch {
-                withContext(Dispatchers.IO) { OpenWisprConfigStore.save(context, config) }
-                saved = true
-            }
+            }) { Text(if (progress.active) "Save and continue" else if (saved) "Saved" else "Save") }
         }
     }
 }
@@ -196,15 +218,16 @@ private fun SettingsForm(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun NetworkDisclosure(secureStorageAvailable: Boolean) {
+private fun NetworkDisclosure(config: OpenWisprConfig) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
-            "Voice recordings are sent to the selected provider. Keyboard typing, predictions, and swipe input remain local.",
+            "Final audio goes to ${config.provider.displayName}. " +
+                if (config.refinementEnabled) "Refinement sends transcript text to ${config.refinementProvider.displayName}." else "Refinement is off.",
             style = MaterialTheme.typography.bodyMedium,
         )
         Text(
-            if (secureStorageAvailable) {
-                "API keys are encrypted on this device."
+            if (config.secureStorageAvailable) {
+                "API keys are encrypted on this device. Live preview, when available, and keyboard typing stay on this device."
             } else {
                 "Secure storage is unavailable. API keys remain only until this process stops."
             },
