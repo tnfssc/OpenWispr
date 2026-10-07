@@ -13,7 +13,8 @@ A native macOS menu bar dictation app inspired by the [OpenWispr GNOME flow](../
   - Local `whisper-cli`
   - OpenAI endpoint
   - Groq endpoint
-- Optional LLM transcript cleanup (OpenAI or Groq)
+  - OpenRouter Parakeet
+- Optional LLM transcript cleanup (OpenAI, Groq, or OpenRouter)
 - Optional FFmpeg silence trimming
 - Clipboard copy always + optional auto-paste (`Cmd+V` simulation)
 - Optional clipboard restore after auto-paste
@@ -70,7 +71,26 @@ For local STT, point `Local Model Path` to a valid Whisper model file, for examp
 
 ## Provider onboarding
 
-Open Settings and choose **Groq** for the recommended fast free setup. Create a key in the [Groq Console](https://console.groq.com/keys), paste it into the Groq API key field, and keep the default models. See the shared [provider guide](../../docs/providers.md) for models and privacy behavior.
+On a fresh install, **Set up OpenWispr** opens a native window. It explains audio and
+cleanup destinations, connects your provider (Groq recommended), checks Microphone
+and Accessibility, captures toggle/hold shortcuts, and runs a real test dictation.
+The test displays text in setup only: it never pastes or changes your clipboard.
+Keep the default models; provider keys, endpoints, and local paths use existing Settings.
+
+Use **Back** or **Finish later** anytime. Progress and completion are saved; reopen
+setup from the menu or Settings. Existing configured users are not shown setup
+automatically, and no settings are reset. Accessibility is optional when automatic
+paste is off. Key creation and system privacy settings have direct links. Close setup
+to resume everyday recording shortcuts; use the buttons for the safe test.
+
+Failed test audio is separate from saved everyday dictations. **Retry test** uses
+current settings; **Discard test audio** deletes only that test. Leaving while
+recording stops without uploading; already-running processing may finish in setup.
+Test audio and text are session-only: successful test audio is deleted, and any
+remaining test audio is removed on a normal quit. Everyday failure recovery still
+survives restarts as described above.
+
+See the shared [provider guide](../../docs/providers.md) for models and privacy behavior.
 
 ## Notes
 
@@ -112,4 +132,5 @@ Pushing any git tag triggers `.github/workflows/release.yml`, which will:
 
 - `scripts/lint.sh`: strict style checks using `swift format lint`.
 - `scripts/test.sh`: self-test executable for shortcut parsing, response parsing, and path resolution.
-- `scripts/check.sh`: lint + build + tests in one command.
+- `scripts/check.sh`: lint + build + self tests + Swift Testing in one command.
+- `swift test --filter "setup|captur"`: focused setup progress, shortcut capture, safe test-result, cancellation, and audio isolation tests.

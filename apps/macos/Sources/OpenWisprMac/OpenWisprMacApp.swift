@@ -23,7 +23,14 @@ struct MenuBarContentView: View {
         appState.toggleRecording(source: .menu)
       }
       .keyboardShortcut("r", modifiers: [.control, .option])
-      .disabled(appState.isProcessing)
+      .disabled(
+        appState.isProcessing || appState.recordingStartPending || appState.setupDictation.isBusy
+          || (appState.setupIsVisible && !appState.isRecording))
+
+      if appState.setupIsVisible && !appState.isRecording {
+        Text("Close setup to use recording shortcuts.")
+          .font(.caption).foregroundStyle(.secondary)
+      }
 
       if appState.isProcessing {
         Button("Cancel") { appState.cancelProcessing() }
@@ -37,7 +44,8 @@ struct MenuBarContentView: View {
           Button("Retry") { appState.retrySavedRecording() }
           Button("Discard") { appState.discardSavedRecording() }
         }
-        .disabled(appState.isRecording)
+        .disabled(
+          appState.isRecording || appState.recordingStartPending || appState.setupDictation.isBusy)
         Text("Retry processes the oldest recording and copies the result.")
           .font(.caption2)
           .foregroundStyle(.secondary)
@@ -86,6 +94,8 @@ struct MenuBarContentView: View {
       }
 
       Divider()
+
+      Button("Set up OpenWispr…") { appState.openSetup() }
 
       SettingsLink {
         Text("Settings")

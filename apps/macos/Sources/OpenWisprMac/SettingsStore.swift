@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 @MainActor
@@ -33,7 +34,7 @@ final class SettingsStore: ObservableObject {
     Return only cleaned transcript text.
     """
 
-  private let defaults = UserDefaults.standard
+  private let defaults: UserDefaults
 
   var hotkeyDidChange: (() -> Void)?
   var startAtLoginDidChange: ((Bool) -> Void)?
@@ -190,7 +191,8 @@ final class SettingsStore: ObservableObject {
     didSet { persist("llmCleanupPrompt", llmCleanupPrompt) }
   }
 
-  init() {
+  init(defaults: UserDefaults = .standard) {
+    self.defaults = defaults
     holdToSpeakEnabled = defaults.object(forKey: "holdToSpeakEnabled") as? Bool ?? true
 
     let savedHoldShortcut = defaults.string(forKey: "holdShortcut")
