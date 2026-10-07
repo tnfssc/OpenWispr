@@ -6,6 +6,7 @@ import Shell from 'gi://Shell';
 import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import { Extension, gettext as _ } from 'resource:///org/gnome/shell/extensions/extension.js';
 
@@ -54,6 +55,10 @@ Editing rules:
 const DBUS_CONTROL_IFACE = `
 <node>
   <interface name="org.gnome.Shell.Extensions.OpenWispr">
+    <method name="TestStart"><arg type="s" direction="in"/><arg type="b" direction="out"/></method>
+    <method name="TestStop"><arg type="s" direction="in"/><arg type="b" direction="out"/></method>
+    <method name="TestCancel"><arg type="s" direction="in"/><arg type="b" direction="out"/></method>
+    <signal name="TestState"><arg type="s"/><arg type="s"/><arg type="s"/><arg type="s"/></signal>
     <method name="Toggle">
       <arg name="source" type="s" direction="in"/>
       <arg name="recording" type="b" direction="out"/>
@@ -141,11 +146,22 @@ class OpenWisprController {
         );
         this._indicator.add_child(this._icon);
         
-        // Click to toggle
-        this._indicatorClickId = this._indicator.connect('button-press-event', () => {
-            this._toggleRecording();
-            return Clutter.EVENT_PROPAGATE;
+        // Opening the menu must never start a recording behind a recovery action.
+        this._recordItem = this._indicator.menu.addAction(_('Start dictation'), () => this._toggleRecording());
+        this._cancelItem = this._indicator.menu.addAction(_('Cancel processing · keep audio'), () => this._cancelTranscription());
+        this._savedItem = new PopupMenu.PopupMenuItem(_('No saved audio'), {reactive: false});
+        this._indicator.menu.addMenuItem(this._savedItem);
+        this._retryItem = this._indicator.menu.addAction(_('Retry oldest · copy result'), () => this._retrySavedAudio());
+        this._discardItem = this._indicator.menu.addAction(_('Discard oldest saved audio'), () => this._discardSavedAudio());
+        this._savedItem.visible = this._retryItem.visible = this._discardItem.visible = false;
+        this._indicator.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        this._indicator.menu.addAction(_('Set up dictation…'), () => {
+            this._settings.set_boolean('setup-requested', true);
+            this._extension.openPreferences();
         });
+        this._indicator.menu.addAction(_('Settings…'), () => this._extension.openPreferences());
+        this._indicator.menu.connect('open-state-changed', (_menu, open) => { if (open) this._refreshRecovery(); });
+        this._refreshRecovery();
 
         Main.panel.addToStatusArea(this.uuid, this._indicator);
 
@@ -161,6 +177,9 @@ class OpenWisprController {
         try {
             this._dbusConn = null;
             this._dbusApi = {
+                TestStart: session => this.TestStart(session),
+                TestStop: session => this.TestStop(session),
+                TestCancel: session => this.TestCancel(session),
                 Toggle: source => this.Toggle(source),
                 Start: source => this.Start(source),
                 Stop: (transcribe, source) => this.Stop(transcribe, source),
@@ -382,7 +401,7 @@ class OpenWisprController {
             return false;
         }
 
-        if (this._recording || this._processing)
+        if (this._recording || this._processing || (this._testActive && trigger !== 'test'))
             return false;
 
         this._remoteHoldBinding = this._parseRemotePortalBinding(triggerSource);
@@ -431,6 +450,7 @@ class OpenWisprController {
     }
 
     _toggleRecording() {
+        if (this._testActive) return false;
         if (this._recording) {
             this._stopRecording(true);
         } else if (this._processing) {
@@ -655,7 +675,8 @@ class OpenWisprController {
                     started = reply[0] === true;
                 } catch (e) {
                     console.error(`[openwispr-gnome-extension] Companion start failed: ${e}`);
-                    this._notifyError('Failed to start recording via companion service.');
+                    this._notifyError('Could not start recording. Check the microphone and companion service.');
+                    if (this._testActive) this._emitTestState('failed', '', 'Could not start recording. Check Sound input and the companion service.');
                     this._companionProxy = null;
                     this._resetState();
                     return;
@@ -663,6 +684,7 @@ class OpenWisprController {
 
                 if (!started) {
                     this._debug(`Companion declined to start (${triggerSource}).`);
+                    if (this._testActive) this._emitTestState('failed', '', 'The companion is busy. Finish or cancel the current dictation.');
                     this._resetState();
                     return;
                 }
@@ -670,6 +692,11 @@ class OpenWisprController {
                 this._processing = false;
                 this._recording = true;
                 this._setPanelIconState('recording');
+                if (triggerSource === 'test') {
+                    if (this._testCancelRequested) this._stopRecording(false);
+                    else this._emitTestState('recording');
+                }
+                this._refreshRecovery();
             }
         );
 
@@ -766,7 +793,8 @@ class OpenWisprController {
                     }
                 } catch (e) {
                     console.error(`[openwispr-gnome-extension] Companion stop failed: ${e}`);
-                    this._notifyError('Could not stop recording. Try again.');
+                    this._notifyError('Could not process recording. Check the companion service. Audio may be saved; open the top-bar menu.');
+                    if (this._testActive) this._emitTestState('failed', '', 'Could not process recording. Check the companion service and saved audio in the top-bar menu.');
                     this._companionProxy = null;
                     this._resetState();
                 }
@@ -778,6 +806,7 @@ class OpenWisprController {
     // transcript, err) emitted by the companion engine after the pipeline
     // finishes. The token is matched against the pending in-flight stop.
     _onCompanionSignal(proxy, signalName, params) {
+        if (!this._enabled) return;
         if (signalName !== 'TranscriptionComplete')
             return;
 
@@ -786,7 +815,7 @@ class OpenWisprController {
         if (!this._pendingTranscription || this._pendingTranscription.token !== token) {
             // Stop replies and signals are independent D-Bus messages. Keep a
             // small early-delivery cache so a signal cannot race token setup.
-            if (this._processing && token && this._earlyTranscriptionSignals.size < 8)
+            if (this._awaitingTranscriptionToken && token && this._earlyTranscriptionSignals.size < 8)
                 this._earlyTranscriptionSignals.set(token, [transcript, errStr]);
             return;
         }
@@ -798,19 +827,22 @@ class OpenWisprController {
         if (!this._pendingTranscription || this._pendingTranscription.token !== token)
             return;
 
-        const { transcribe, cancelled } = this._pendingTranscription;
+        const { transcribe, cancelled, copyOnly } = this._pendingTranscription;
         this._pendingTranscription = null;
         this._cancelRequests.delete(token);
 
         if (cancelled) {
             this._debug(`Discarding cancelled transcription result (${token}).`);
+            this._notify('Processing cancelled. Audio stays saved on this device.');
             this._resetState();
             return;
         }
 
         if (errStr) {
             console.error(`[openwispr-gnome-extension] Companion transcription failed: ${errStr}`);
-            this._notifyError(this._userSafeCompanionError(errStr));
+            const message = this._userSafeCompanionError(errStr);
+            if (this._testActive) this._emitTestState('failed', '', `${message} Audio saved on this device. Retry or Discard in the top-bar menu.`);
+            this._notifyError(`${message} Audio saved on this device. Open the top-bar menu to Retry or Discard.`);
             this._resetState();
             return;
         }
@@ -823,9 +855,18 @@ class OpenWisprController {
                 this._debug(`Text received (${finalText.length} chars)`);
 
             if (finalText) {
-                this._notify(`Transcribed: ${finalText}`);
-                this._injectText(finalText);
+                if (this._testActive) {
+                    this._emitTestState('result', finalText);
+                    this._testActive = false;
+                } else if (copyOnly) {
+                    St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, finalText);
+                    this._notify('Result copied. Paste it where you want.');
+                } else {
+                    this._notify(`Transcribed: ${finalText}`);
+                    this._injectText(finalText);
+                }
             } else {
+                if (this._testActive) this._emitTestState('empty', '', 'No speech detected. Check your microphone and try again.');
                 this._notify('No speech detected.');
             }
         }
@@ -877,15 +918,117 @@ class OpenWisprController {
         );
     }
 
+
+    _emitTestState(state, text = '', error = '') {
+        this._dbusControl?.emit_signal('TestState', new GLib.Variant('(ssss)', [this._testSession || '', state, text, error]));
+    }
+
+    TestStart(session) {
+        if (!session) return false;
+        if (this._recording || this._processing || this._testActive) return false;
+        this._testActive = true;
+        this._testSession = session;
+        this._testCancelRequested = false;
+        this._startRecording('test');
+        if (!this._processing) {
+            this._testActive = false;
+            return false;
+        }
+        return true;
+    }
+
+    TestStop(session) {
+        if (session !== this._testSession) return false;
+        if (!this._testActive || !this._recording) return false;
+        this._emitTestState('processing');
+        this._stopRecording(true);
+        return true;
+    }
+
+    TestCancel(session) {
+        if (session !== this._testSession) return false;
+        if (!this._testActive) return false;
+        this._testCancelRequested = true;
+        if (this._recording) this._stopRecording(false);
+        else if (this._pendingTranscription || this._awaitingTranscriptionToken) this._cancelTranscription();
+        return true;
+    }
+
+    _refreshRecovery() {
+        if (!this._enabled || !this._savedItem) return;
+        this._recordItem.label.text = this._recording ? _('Stop dictation') : _('Start dictation');
+        this._recordItem.setSensitive(!this._testActive && (!this._processing || this._recording));
+        this._cancelItem.visible = Boolean(this._pendingTranscription || this._awaitingTranscriptionToken);
+        this._retryItem.setSensitive(false);
+        this._discardItem.setSensitive(false);
+        this._retryItem.visible = this._discardItem.visible = false;
+        const proxy = this._getCompanionProxy();
+        if (!proxy) { this._savedItem.visible = true; this._savedItem.label.text = _('Companion unavailable · reopen to check saved audio'); return; }
+        proxy.call('RecoveryStatus', null, Gio.DBusCallFlags.NONE, COMPANION_START_TIMEOUT_MS, null, (p, res) => {
+            if (!this._enabled) return;
+            try {
+                const [count] = p.call_finish(res).deep_unpack();
+                this._savedItem.label.text = count ? _('Saved audio on this device: ') + count : _('No saved audio');
+                const idle = !this._recording && !this._processing;
+                this._savedItem.visible = this._retryItem.visible = this._discardItem.visible = count > 0 && idle;
+                this._retryItem.setSensitive(count > 0 && idle);
+                this._discardItem.setSensitive(count > 0 && idle);
+            } catch (e) { this._savedItem.visible = true; this._savedItem.label.text = _('Could not check saved audio · check companion service'); }
+        });
+    }
+
+    _discardSavedAudio() {
+        if (this._recording || this._processing) return;
+        const proxy = this._getCompanionProxy();
+        if (!proxy) return;
+        proxy.call('Discard', null, Gio.DBusCallFlags.NONE, COMPANION_START_TIMEOUT_MS, null, (p, res) => {
+            if (!this._enabled) return;
+            try { p.call_finish(res); } catch (e) { this._notifyError('Could not delete saved audio. Try again.'); }
+            this._refreshRecovery();
+        });
+    }
+
+    _retrySavedAudio() {
+        if (this._recording || this._processing) return;
+        const proxy = this._getCompanionProxy();
+        if (!proxy) return;
+        this._processing = true;
+        this._awaitingTranscriptionToken = true;
+        this._cancelRequested = false;
+        this._setPanelIconState('processing');
+        this._refreshRecovery();
+        proxy.call('Retry', new GLib.Variant('(s)', [this._buildCompanionConfig()]), Gio.DBusCallFlags.NONE,
+            COMPANION_START_TIMEOUT_MS, null, (p, res) => {
+                if (!this._enabled) return;
+                try {
+                    const [token] = p.call_finish(res).deep_unpack();
+                    if (!token) { this._resetState(); return; }
+                    this._awaitingTranscriptionToken = false;
+                    this._pendingTranscription = {token, transcribe: true, copyOnly: true, cancelled: this._cancelRequested};
+                    const early = this._earlyTranscriptionSignals.get(token);
+                    if (early) { this._earlyTranscriptionSignals.delete(token); this._handleTranscriptionComplete(token, ...early); }
+                    else if (this._cancelRequested) this._requestCompanionCancel(token);
+                } catch (e) {
+                    this._notifyError('Could not retry. Audio is still saved on this device. Check the companion service.');
+                    this._resetState();
+                }
+            });
+    }
+
     _userSafeCompanionError(error) {
         const detail = String(error || '').toLowerCase();
         if (detail.includes('api key') || detail.includes('unauthorized') ||
             detail.includes('authentication') || detail.includes('forbidden'))
             return 'Transcription failed: check your provider API key.';
+        if (detail.includes('429') || detail.includes('rate limit'))
+            return 'The provider is busy. Wait a moment, then Retry.';
+        if (detail.includes('whisper') || detail.includes('model file') || detail.includes('ffmpeg'))
+            return 'Local transcription could not run. Check recording tools and the local model in setup.';
         if (detail.includes('timeout') || detail.includes('deadline'))
             return 'Transcription timed out. Check your connection and try again.';
         if (detail.includes('connect') || detail.includes('network') ||
-            detail.includes('http'))
+            detail.includes('http') || detail.includes('dial') || detail.includes('lookup') ||
+            detail.includes('tls') || detail.includes('dns'))
             return 'Transcription could not reach the provider. Check your connection.';
         return 'Transcription failed. Check provider settings and try again.';
     }
@@ -917,7 +1060,9 @@ class OpenWisprController {
             // Invalidate the cache and reset recording state if the companion
             // vanishes mid-recording, so we never hold a stale proxy.
             proxy.connect('notify::g-name-owner', () => {
+                if (!this._enabled) return;
                 if (!proxy.get_name_owner()) {
+                    if (this._testActive) this._emitTestState('failed', '', 'The companion stopped. Restart it, then check saved audio in the top-bar menu.');
                     this._companionProxy = null;
                     this._resetState();
                 }
@@ -1171,6 +1316,14 @@ class OpenWisprController {
     }
 
     _resetState() {
+        if (this._testActive) {
+            if (this._testCancelRequested || this._cancelRequested) {
+                this._emitTestState('cancelled', '', this._cancelRequested
+                    ? 'Processing cancelled. Audio stays saved on this device. Use Retry or Discard in the top-bar menu.'
+                    : 'Recording cancelled. No audio kept.');
+            } else this._emitTestState('idle');
+            this._testActive = false;
+        }
         // Post-recording reset. May touch the panel icon, so only call after the
         // indicator/_icon exists (i.e. from enable()'s later init or from callbacks).
         this._recording = false;
@@ -1186,6 +1339,9 @@ class OpenWisprController {
         // the next captured-event pass doesn't treat a stale press as a new start.
         this._holdKeyPressed = false;
         this._setPanelIconState('idle');
+        this._testCancelRequested = false;
+        this._testSession = null;
+        if (this._enabled) this._refreshRecovery();
     }
 
     _setPanelIconState(state) {

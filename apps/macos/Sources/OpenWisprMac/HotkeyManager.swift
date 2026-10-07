@@ -269,6 +269,8 @@ final class HotkeyManager {
     return normalized == "rightoption" || normalized == "ralt"
   }
 
+  func suspend() { unregisterAll() }
+
   private func unregisterAll() {
     if let toggleHotkeyRef {
       UnregisterEventHotKey(toggleHotkeyRef)

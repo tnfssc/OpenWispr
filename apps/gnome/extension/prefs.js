@@ -21,7 +21,11 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         this._textSettings = [];
         this._spinRows = [];
 
-        const page = new Adw.PreferencesPage();
+        const page = new Adw.PreferencesPage({ title: _('Settings'), icon_name: 'emblem-system-symbolic' });
+        this._settingsPage = page;
+        this._draftSettings = settings;
+        this._setupState = this.getSettings();
+        let setupRequestedId = null;
         window.add(page);
 
         const saveGroup = new Adw.PreferencesGroup();
@@ -39,8 +43,21 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         this._saveRow.activatable_widget = saveButton;
         saveGroup.add(this._saveRow);
         page.add(saveGroup);
-        const changedId = settings.connect('changed', () => this._markUnsaved());
+        const setupGroup = new Adw.PreferencesGroup();
+        const setupRow = new Adw.ActionRow({title: _('Set up dictation'), subtitle: _('Provider, microphone, shortcuts, and a safe first dictation.')});
+        const setupButton = new Gtk.Button({label: _('Open setup'), valign: Gtk.Align.CENTER});
+        setupButton.connect('clicked', () => this._openSetup(window));
+        setupRow.add_suffix(setupButton);
+        setupRow.activatable_widget = setupButton;
+        setupGroup.add(setupRow);
+        page.add(setupGroup);
+        const changedId = settings.connect('changed', (_settings, key) => {
+            if (!key.startsWith('setup-')) this._markUnsaved();
+        });
         window.connect('close-request', () => {
+            if (this._setupIdle) { GLib.source_remove(this._setupIdle); this._setupIdle = null; }
+            this._leaveSetup();
+            if (setupRequestedId) this._setupState.disconnect(setupRequestedId);
             settings.disconnect(changedId);
             settings.revert();
             return false;
@@ -103,6 +120,15 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         const shortcutsGroup = new Adw.PreferencesGroup({ title: _('Shortcuts') });
         page.add(shortcutsGroup);
 
+        this._addShortcutCaptureRow(
+            window,
+            shortcutsGroup,
+            settings,
+            'toggle-recording',
+            _('Toggle Recording'),
+            _('Click the shortcut button, then press your keys.')
+        );
+
         const holdToSpeakRow = new Adw.SwitchRow({
             title: _('Hold to Speak'),
             subtitle: _('Hold your configured shortcut to record. Release to transcribe.'),
@@ -117,7 +143,7 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
             settings,
             'hold-to-speak-keybinding',
             _('Hold To Speak Shortcut'),
-            _('Click Set, then press the key combination.')
+            _('Click the shortcut button, then press your keys.')
         );
 
         const pasteMethods = ['ctrl-v', 'ctrl-shift-v', 'shift-insert', 'clipboard-only'];
@@ -164,14 +190,6 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         notificationsRow.connect('notify::active', () => settings.set_boolean('notifications-enabled', notificationsRow.active));
         shortcutsGroup.add(notificationsRow);
 
-        this._addShortcutCaptureRow(
-            window,
-            shortcutsGroup,
-            settings,
-            'toggle-recording',
-            _('Toggle Recording'),
-            _('Click Set, then press the key combination.')
-        );
 
         const audioGroup = new Adw.PreferencesGroup({ title: _('Audio Pipeline') });
         page.add(audioGroup);
@@ -212,26 +230,13 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         this._spinRows.push(silenceDurationRow);
         audioGroup.add(silenceDurationRow);
 
-        const sttGroup = new Adw.PreferencesGroup({ title: _('Speech to Text') });
+        const sttGroup = new Adw.PreferencesGroup({ title: _('Speech to Text'), description: _('Remote providers receive your audio. Local Whisper processes audio on this computer.') });
         page.add(sttGroup);
-
-        this._addLinkRow(
-            sttGroup,
-            _('Create Groq API Key (Recommended)'),
-            _('Groq is the fastest free default. Create a key, paste it below, and record.'),
-            'https://console.groq.com/keys'
-        );
-        this._addLinkRow(
-            sttGroup,
-            _('Create OpenRouter API Key'),
-            _('Optional alternative using NVIDIA Parakeet for transcription.'),
-            'https://openrouter.ai/keys'
-        );
 
         const sttProviderOptions = [
             { id: 'local', label: _('Local whisper-cli') },
             { id: 'openai', label: _('OpenAI Whisper Endpoint') },
-            { id: 'groq', label: _('Groq Endpoint') },
+            { id: 'groq', label: _('Groq') },
             { id: 'openrouter', label: _('OpenRouter NVIDIA Parakeet') },
         ];
         const sttProviderModel = Gtk.StringList.new(sttProviderOptions.map(option => option.label));
@@ -247,21 +252,27 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         sttProviderRow.selected = sttIndex >= 0 ? sttIndex : 0;
         sttGroup.add(sttProviderRow);
 
+        const sttOpenAiApiKeyRow = this._addSecretRow(sttGroup, settings, 'stt-openai-api-key', _('OpenAI STT API Key'));
+        const sttGroqApiKeyRow = this._addSecretRow(sttGroup, settings, 'stt-groq-api-key', _('Groq STT API Key'));
+        const sttOpenRouterApiKeyRow = this._addSecretRow(sttGroup, settings, 'stt-openrouter-api-key', _('OpenRouter STT API Key'));
+        const sttOpenAiKeyLink = this._addLinkRow(sttGroup, _('Create OpenAI API key'), _('Open the provider website, then paste your key above.'), 'https://platform.openai.com/api-keys');
+        const sttGroqKeyLink = this._addLinkRow(sttGroup, _('Create Groq API key'), _('Open the provider website, then paste your key above.'), 'https://console.groq.com/keys');
+        const sttOpenRouterKeyLink = this._addLinkRow(sttGroup, _('Create OpenRouter API key'), _('Open the provider website, then paste your key above.'), 'https://openrouter.ai/keys');
         const sttOpenAiEndpointRow = this._addEntryRow(sttGroup, settings, 'stt-openai-endpoint', _('OpenAI STT Endpoint'));
         const sttOpenAiModelRow = this._addEntryRow(sttGroup, settings, 'stt-openai-model', _('OpenAI STT Model'));
-        const sttOpenAiApiKeyRow = this._addSecretRow(sttGroup, settings, 'stt-openai-api-key', _('OpenAI STT API Key'));
         const sttGroqEndpointRow = this._addEntryRow(sttGroup, settings, 'stt-groq-endpoint', _('Groq STT Endpoint'));
         const sttGroqModelRow = this._addEntryRow(sttGroup, settings, 'stt-groq-model', _('Groq STT Model'));
-        const sttGroqApiKeyRow = this._addSecretRow(sttGroup, settings, 'stt-groq-api-key', _('Groq STT API Key'));
         const sttOpenRouterEndpointRow = this._addEntryRow(sttGroup, settings, 'stt-openrouter-endpoint', _('OpenRouter STT Endpoint'));
         const sttOpenRouterModelRow = this._addEntryRow(sttGroup, settings, 'stt-openrouter-model', _('OpenRouter STT Model'));
-        const sttOpenRouterApiKeyRow = this._addSecretRow(sttGroup, settings, 'stt-openrouter-api-key', _('OpenRouter STT API Key'));
 
         const updateSttProviderVisibility = providerId => {
             const showOpenAi = providerId === 'openai';
             const showGroq = providerId === 'groq';
             const showOpenRouter = providerId === 'openrouter';
 
+            sttOpenAiKeyLink.set_visible(showOpenAi);
+            sttGroqKeyLink.set_visible(showGroq);
+            sttOpenRouterKeyLink.set_visible(showOpenRouter);
             sttOpenAiEndpointRow.set_visible(showOpenAi);
             sttOpenAiModelRow.set_visible(showOpenAi);
             sttOpenAiApiKeyRow.set_visible(showOpenAi);
@@ -280,7 +291,7 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
             updateSttProviderVisibility(selected.id);
         });
 
-        const llmGroup = new Adw.PreferencesGroup({ title: _('LLM Cleanup') });
+        const llmGroup = new Adw.PreferencesGroup({ title: _('LLM Cleanup'), description: _('When enabled, transcript text is sent to the selected cleanup provider.') });
         page.add(llmGroup);
 
         this._addLinkRow(
@@ -363,6 +374,244 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
             _('LLM Cleanup Prompt'),
             _('Edit multiline cleanup instructions.')
         );
+        this._setupProviderGroups = [sttGroup, llmGroup];
+        this._setupShortcutGroup = shortcutsGroup;
+        this._setupExtraShortcutRows = [restoreClipboardRow, notificationsRow];
+        setupRequestedId = this._setupState.connect('changed::setup-requested', () => {
+            if (this._setupState.get_boolean('setup-requested')) this._openSetup(window);
+        });
+        const configured = settings.get_user_value('stt-provider') !== null || settings.get_strv('toggle-recording').length > 0 || settings.get_strv('hold-to-speak-keybinding').length > 0 || ['stt-openai-api-key', 'stt-groq-api-key', 'stt-openrouter-api-key']
+            .some(key => settings.get_string(key).trim()) || settings.get_string('stt-provider') === 'local';
+        if (this._setupState.get_boolean('setup-requested') || (!configured && !this._setupState.get_boolean('setup-completed'))) {
+            this._setupIdle = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                this._setupIdle = null;
+                this._openSetup(window);
+                return GLib.SOURCE_REMOVE;
+            });
+        }
+    }
+
+
+    _openSetup(parent) {
+        this._setupState.set_boolean('setup-requested', false);
+        if (this._setupWindow) { this._setupWindow.present(); return; }
+        this._setupTestPassed = false;
+        this._setupWindow = new Gtk.Window({title: _('Set up dictation'), transient_for: parent, modal: true,
+            default_width: 680, default_height: 660});
+        const root = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, spacing: 12,
+            margin_top: 16, margin_bottom: 16, margin_start: 16, margin_end: 16});
+        this._setupToastOverlay = new Adw.ToastOverlay();
+        this._setupToastOverlay.set_child(root);
+        this._setupWindow.set_child(this._setupToastOverlay);
+        this._setupProgress = new Gtk.Label({xalign: 0});
+        root.append(this._setupProgress);
+        this._setupStack = new Gtk.Stack({vexpand: true});
+        root.append(this._setupStack);
+        this._setupPages = [];
+        for (let i = 0; i < 4; i++) {
+            const page = new Adw.PreferencesPage();
+            this._setupPages.push(page);
+            this._setupStack.add_named(page, String(i));
+        }
+        const intro = new Adw.PreferencesGroup({title: _('Where your speech goes'),
+            description: _('Remote transcription sends audio to your provider. Local Whisper stays on this computer. Optional cleanup sends text to its provider. Keys are saved in existing settings. Save and continue applies your edits.')});
+        this._setupPages[0].add(intro);
+        this._sttDescription = this._setupProviderGroups[0].description;
+        this._setupProviderGroups[0].description = '';
+        for (const group of this._setupProviderGroups) { this._settingsPage.remove(group); this._setupPages[0].add(group); }
+        const checks = new Adw.PreferencesGroup({title: _('Microphone and prerequisites'),
+            description: _('Recording uses your default Sound input through PulseAudio or PipeWire. Choose an input, unmute it, and allow microphone access if your system asks. The test will verify real recording.')});
+        this._setupPages[1].add(checks);
+        this._checkRow = new Adw.ActionRow({title: _('Check this computer'), subtitle: _('No software is installed by setup.')});
+        const checkButton = new Gtk.Button({label: _('Check again'), valign: Gtk.Align.CENTER});
+        checkButton.connect('clicked', () => this._runSetupChecks());
+        this._checkRow.add_suffix(checkButton);
+        checks.add(this._checkRow);
+        const soundRow = new Adw.ActionRow({title: _('Choose and unmute your microphone')});
+        const sound = new Gtk.Button({label: _('Open Sound'), valign: Gtk.Align.CENTER});
+        sound.connect('clicked', () => {
+            try { Gio.Subprocess.new(['gnome-control-center', 'sound'], Gio.SubprocessFlags.NONE); }
+            catch (e) { this._checkRow.subtitle = _('Could not open Sound. Open Settings → Sound and check Input.'); }
+        });
+        soundRow.add_suffix(sound); checks.add(soundRow);
+        this._addLinkRow(checks, _('Installation guide'), _('FFmpeg, companion, and local Whisper model instructions. Nothing is installed automatically.'), 'https://github.com/tnfssc/OpenWispr/tree/develop/apps/gnome#installation');
+        checks.add(new Adw.ActionRow({title: _('Shortcuts do not need raw keyboard access'),
+            subtitle: _('Use the native shortcuts in the next step. Portal and /dev/input warnings from doctor apply to the optional hotkey daemon, not native shortcuts.')}));
+        const doctorButton = new Gtk.Button({label: _('Run doctor checks'), halign: Gtk.Align.START});
+        const doctorRow = new Adw.ActionRow({title: _('Existing companion checks')});
+        doctorRow.add_suffix(doctorButton); checks.add(doctorRow);
+        this._doctorResult = new Gtk.Label({wrap: true, selectable: true, xalign: 0});
+        checks.add(this._doctorResult);
+        doctorButton.connect('clicked', () => this._runDoctor(doctorButton));
+        for (const row of this._setupExtraShortcutRows) row.visible = false;
+        this._settingsPage.remove(this._setupShortcutGroup);
+        this._setupPages[2].add(new Adw.PreferencesGroup({title: _('Speak, stop, and insert'),
+            description: _('Choose your own shortcut; none is assigned for you. Toggle starts and stops. Hold records until release. You can also use Start dictation in the top-bar menu. Normal dictation uses your paste choice; Retry only copies.') }));
+        this._setupPages[2].add(this._setupShortcutGroup);
+        const test = new Adw.PreferencesGroup({title: _('Try a short dictation'),
+            description: _('Say “This is my first dictation,” then stop. This uses your saved provider settings. The result stays here; nothing is pasted into another app. Failed audio stays on this device until Retry succeeds or you Discard it in the top-bar menu.')});
+        this._setupPages[3].add(test);
+        this._testStatus = new Adw.ActionRow({title: _('Ready to test'), subtitle: _('Use a short phrase without sensitive information.')});
+        test.add(this._testStatus);
+        this._testStartButton = new Gtk.Button({label: _('Start test'), valign: Gtk.Align.CENTER});
+        this._testStopButton = new Gtk.Button({label: _('Stop test'), valign: Gtk.Align.CENTER, sensitive: false});
+        this._testCancelButton = new Gtk.Button({label: _('Cancel'), valign: Gtk.Align.CENTER, sensitive: false});
+        this._testStatus.add_suffix(this._testStartButton);
+        this._testStatus.add_suffix(this._testStopButton);
+        this._testStatus.add_suffix(this._testCancelButton);
+        this._testResult = new Gtk.Label({wrap: true, selectable: true, xalign: 0});
+        test.add(this._testResult);
+        this._testCopyButton = new Gtk.Button({label: _('Copy result'), halign: Gtk.Align.START, sensitive: false});
+        this._testCopyButton.connect('clicked', () => Gdk.Display.get_default()?.get_clipboard().set(this._testResult.label));
+        test.add(this._testCopyButton);
+        this._testStartButton.connect('clicked', () => {
+            this._setupTestSession = GLib.uuid_string_random();
+            this._setupTestPassed = false; this._testResult.label = ''; this._testCopyButton.sensitive = false;
+            this._showTestState('starting');
+            this._callSetupTest('TestStart');
+        });
+        this._testStopButton.connect('clicked', () => { this._showTestState('processing'); this._callSetupTest('TestStop'); });
+        this._testCancelButton.connect('clicked', () => { this._testStatus.subtitle = _('Cancelling… Processing audio stays saved on this device.'); this._callSetupTest('TestCancel'); });
+        const actions = new Gtk.Box({spacing: 8}); root.append(actions);
+        const leave = new Gtk.Button({label: _('Leave setup')}); leave.connect('clicked', () => { this._leaveSetup(); parent.add_toast(new Adw.Toast({title: _('Setup left. Unsaved edits remain here; Save keeps them.')})); }); actions.append(leave);
+        this._setupBack = new Gtk.Button({label: _('Back')});
+        this._setupBack.connect('clicked', () => {
+            this._cancelSetupTest(); this._setupTestPassed = false;
+            this._showSetupStep(this._setupStep - 1);
+        }); actions.append(this._setupBack);
+        this._setupNext = new Gtk.Button({label: _('Continue'), hexpand: true, halign: Gtk.Align.END, css_classes: ['suggested-action']});
+        this._setupNext.connect('clicked', () => {
+            if (this._setupStep === 0 || this._setupStep === 2) {
+                if (!this._saveSettings(parent, this._draftSettings)) return;
+            }
+            if (this._setupStep === 3) {
+                if (!this._setupTestPassed) return;
+                this._setupState.set_boolean('setup-completed', true);
+                this._setupState.set_int('setup-step', 0);
+                Gio.Settings.sync(); this._leaveSetup();
+                parent.add_toast(new Adw.Toast({title: _('Setup complete. Use your shortcut or the top-bar menu.')}));
+            } else this._showSetupStep(this._setupStep + 1);
+        }); actions.append(this._setupNext);
+        this._setupWindow.connect('close-request', () => { this._leaveSetup(); return true; });
+        this._showSetupStep(this._setupState.get_int('setup-step'));
+        this._setupWindow.present();
+    }
+
+    _showSetupStep(step) {
+        this._setupStep = Math.max(0, Math.min(step, 3));
+        this._setupState.set_int('setup-step', this._setupStep);
+        this._setupStack.visible_child_name = String(this._setupStep);
+        const titles = [_('Provider and privacy'), _('Microphone'), _('Shortcuts and insertion'), _('Test dictation')];
+        this._setupProgress.label = `${this._setupStep + 1} of 4 · ${titles[this._setupStep]}`;
+        this._setupBack.sensitive = this._setupStep > 0;
+        this._setupNext.label = this._setupStep === 3 ? _('Finish setup') : [0, 2].includes(this._setupStep) ? _('Save and continue') : _('Continue');
+        this._setupNext.sensitive = this._setupStep !== 3 || this._setupTestPassed;
+        if (this._setupStep === 1) this._runSetupChecks();
+        if (this._setupStep === 3 && !this._testBusy && !this._setupTestPassed) {
+            this._testResult.label = '';
+            this._testCopyButton.sensitive = false;
+            this._showTestState('ready');
+        }
+    }
+
+    _runSetupChecks() {
+        const missing = [];
+        if (!GLib.find_program_in_path('ffmpeg') && !GLib.file_test('/usr/bin/ffmpeg', GLib.FileTest.IS_EXECUTABLE)) missing.push(_('Install FFmpeg, then check again.'));
+        if (this._draftSettings.get_string('stt-provider') === 'local') {
+            if (!GLib.find_program_in_path('whisper-cli') && !GLib.file_test('/usr/bin/whisper-cli', GLib.FileTest.IS_EXECUTABLE)) missing.push(_('Install whisper-cli for local transcription.'));
+            const model = this.dir?.get_child('models').get_child('ggml-base.en.bin').get_path();
+            if (!model || !GLib.file_test(model, GLib.FileTest.IS_REGULAR)) missing.push(_('Local model missing. Open the GNOME install guide to download ggml-base.en.bin.'));
+        }
+        this._checkRow.subtitle = missing.length ? missing.join(' ') : _('Recording tools found. Check Sound input, then try a dictation.');
+        Gio.DBus.session.call('io.github.tnfssc.OpenWispr.Recorder', '/io/github/tnfssc/OpenWispr/Recorder',
+            'io.github.tnfssc.OpenWispr.Recorder', 'Status', null, null, Gio.DBusCallFlags.NONE, 5000, null, (conn, res) => {
+                if (!this._setupWindow) return;
+                try { conn.call_finish(res); }
+                catch (e) { this._checkRow.subtitle += _(' Companion unavailable. Install the companion from Settings → Companion Setup, or start openwispr-engine.service.'); }
+            });
+    }
+
+    _runDoctor(button) {
+        const binary = GLib.find_program_in_path('openwispr') || GLib.build_filenamev([GLib.get_home_dir(), '.local', 'bin', 'openwispr']);
+        button.sensitive = false;
+        try {
+            const proc = Gio.Subprocess.new([binary, 'doctor'], Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
+            proc.communicate_utf8_async(null, null, (p, res) => {
+                if (!this._setupWindow) return;
+                button.sensitive = true;
+                try {
+                    const [, out, err] = p.communicate_utf8_finish(res);
+                    this._doctorResult.label = (out + err).trim();
+                } catch (e) { this._doctorResult.label = _('Could not run doctor. Check that the companion is installed.'); }
+            });
+        } catch (e) { button.sensitive = true; this._doctorResult.label = _('Companion not found. Install it from Settings → Companion Setup.'); }
+    }
+
+    _ensureSetupTestSignals() {
+        if (this._testSignalId) return;
+        this._testSignalId = Gio.DBus.session.signal_subscribe('org.gnome.Shell.Extensions.OpenWispr',
+            'org.gnome.Shell.Extensions.OpenWispr', 'TestState', '/org/gnome/Shell/Extensions/OpenWispr', null,
+            Gio.DBusSignalFlags.NONE, (_conn, _sender, _path, _iface, _name, params) => {
+                const [session, ...state] = params.deep_unpack();
+                if (this._setupWindow && session === this._setupTestSession) this._showTestState(...state);
+            });
+    }
+
+    _callSetupTest(method) {
+        this._ensureSetupTestSignals();
+        const window = this._setupWindow;
+        const session = this._setupTestSession;
+        Gio.DBus.session.call('org.gnome.Shell.Extensions.OpenWispr', '/org/gnome/Shell/Extensions/OpenWispr',
+            'org.gnome.Shell.Extensions.OpenWispr', method, new GLib.Variant('(s)', [session || '']), null, Gio.DBusCallFlags.NONE, 15000, null, (conn, res) => {
+                if (this._setupWindow !== window || session !== this._setupTestSession) return;
+                try {
+                    const [accepted] = conn.call_finish(res).deep_unpack();
+                    if (!accepted && method !== 'TestCancel') this._showTestState('failed', '', _('The recorder is busy or unavailable. Check the companion and finish other dictation.'));
+                } catch (e) { this._showTestState('failed', '', _('Could not reach the extension. Enable OpenWispr and check the companion service.')); }
+            });
+    }
+
+    _showTestState(state, text = '', error = '') {
+        if (!this._setupWindow || this._setupStep !== 3) return;
+        const busy = ['starting', 'recording', 'processing'].includes(state);
+        this._testBusy = busy;
+        this._testStartButton.sensitive = !busy;
+        this._testStopButton.sensitive = state === 'recording';
+        this._testCancelButton.sensitive = busy;
+        if (state === 'result') {
+            this._setupTestPassed = true;
+            this._testResult.label = text;
+            this._testCopyButton.sensitive = true;
+        }
+        const labels = {ready: _('Ready to test'), starting: _('Starting microphone…'), recording: _('Recording · say a short phrase'), processing: _('Processing · nothing will be pasted'),
+            result: _('Your dictation worked'), empty: _('No speech detected'), cancelled: _('Test cancelled'), failed: _('Test did not finish')};
+        if (state !== 'idle') {
+            this._testStatus.title = labels[state] || _('Ready to test');
+            this._testStatus.subtitle = error || (state === 'result' ? _('Select the text or copy it. Finish saves setup completion.') : '');
+        }
+        this._setupNext.sensitive = this._setupStep !== 3 || this._setupTestPassed;
+    }
+
+    _cancelSetupTest() {
+        if (this._testBusy) {
+            Gio.DBus.session.call('org.gnome.Shell.Extensions.OpenWispr', '/org/gnome/Shell/Extensions/OpenWispr',
+                'org.gnome.Shell.Extensions.OpenWispr', 'TestCancel', new GLib.Variant('(s)', [this._setupTestSession || '']), null, Gio.DBusCallFlags.NONE, 15000, null, null);
+        }
+        this._setupTestSession = null;
+        this._testBusy = false;
+    }
+
+    _leaveSetup() {
+        if (!this._setupWindow) return;
+        this._cancelSetupTest();
+        if (this._testSignalId) { Gio.DBus.session.signal_unsubscribe(this._testSignalId); this._testSignalId = null; }
+        this._setupProviderGroups[0].description = this._sttDescription;
+        for (const group of this._setupProviderGroups) { this._setupPages[0].remove(group); this._settingsPage.add(group); }
+        for (const row of this._setupExtraShortcutRows) row.visible = true;
+        this._setupPages[2].remove(this._setupShortcutGroup); this._settingsPage.add(this._setupShortcutGroup);
+        const window = this._setupWindow; this._setupWindow = null;
+        this._testBusy = false;
+        window.destroy();
     }
 
     _markUnsaved() {
@@ -378,6 +627,7 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
     }
 
     _saveSettings(window, settings) {
+        const toastHost = this._setupWindow ? this._setupToastOverlay : window;
         // Read even the currently focused field; no Enter/focus-out is needed.
         const edits = this._textSettings.map(edit => ({
             ...edit,
@@ -394,17 +644,17 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         }
         if (invalidEdit) {
             this._saveRow.subtitle = _('Settings were not saved. Fix the highlighted fields and click Save.');
-            window.add_toast(new Adw.Toast({ title: invalidEdit.error }));
+            toastHost.add_toast(new Adw.Toast({ title: invalidEdit.error }));
             invalidEdit.widget.grab_focus();
-            return;
+            return false;
         }
 
         for (const edit of edits) {
             if (settings.get_string(edit.key) !== edit.value &&
                 !settings.set_string(edit.key, edit.value)) {
                 this._saveRow.subtitle = _('Settings were not saved. A setting could not be written.');
-                window.add_toast(new Adw.Toast({ title: this._saveRow.subtitle }));
-                return;
+                toastHost.add_toast(new Adw.Toast({ title: this._saveRow.subtitle }));
+                return false;
             }
         }
         for (const row of this._spinRows)
@@ -412,7 +662,8 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         settings.apply();
         Gio.Settings.sync();
         this._saveRow.subtitle = _('Settings saved.');
-        window.add_toast(new Adw.Toast({ title: _('Settings saved.') }));
+        toastHost.add_toast(new Adw.Toast({ title: _('Settings saved.') }));
+        return true;
     }
 
     _addEntryRow(group, settings, key, title) {
@@ -467,6 +718,7 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
     }
 
     _showMultilineEditDialog(window, title, initialText, onSave) {
+        window = this._setupWindow || window;
         const dialog = new Gtk.Window({
             title,
             transient_for: window,
@@ -588,6 +840,7 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
     }
 
     _showShortcutCaptureDialog(window, onCaptured) {
+        window = this._setupWindow || window;
         const dialog = new Gtk.Window({
             title: _('Set Shortcut'),
             transient_for: window,
@@ -724,6 +977,7 @@ export default class OpenWisprPreferences extends ExtensionPreferences {
         row.add_suffix(openButton);
         row.activatable_widget = openButton;
         group.add(row);
+        return row;
     }
 
     _addCommandRow(group, title, subtitle, command) {

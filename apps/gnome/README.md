@@ -134,15 +134,15 @@ Open extension Preferences, choose **Groq** for the recommended fast free setup,
 
 ## Usage
 
-1.  **Start Dictation**: Click the microphone icon in the top bar, or set a custom keyboard shortcut in preferences.
+1.  **Start Dictation**: Open the top-bar menu and choose **Start dictation**, or set your own keyboard shortcut in preferences.
     *   The icon will change to a recording indicator.
     *   Hold-to-speak is available after you assign a shortcut in preferences.
 2.  **Speak**: Dictate your text clearly.
-3.  **Stop & Transcribe**: Click the indicator again or trigger the same shortcut you configured.
+3.  **Stop & Transcribe**: Choose **Stop dictation** in the top-bar menu or trigger the same shortcut you configured.
     *   If using hold-to-speak, just release the hold key/chord.
     *   The extension trims silence with ffmpeg (if enabled), transcribes, then optionally runs LLM cleanup.
     *   Once complete, the text will be automatically pasted into your active window and copied to your clipboard.
-    *   While transcription is processing, click the indicator or trigger the toggle shortcut again to cancel it. A cancelled result is discarded and is never pasted.
+    *   While transcription is processing, choose **Cancel processing · keep audio** in the menu or trigger the toggle shortcut again. The result is never pasted; audio stays saved for Retry or Discard.
 
 ### Companion CLI
 
@@ -346,18 +346,60 @@ Remote STT and LLM keys/endpoints are configurable in extension preferences. Rel
 
 > **Security:** API keys are stored in plaintext in GSettings/dconf (`~/.config/dconf/user`). Do not use shared or production keys. Restrict dconf access accordingly.
 
+## Setup and saved speech
+
+Choose **Set up dictation…** in the top-bar menu (or **Open setup** in preferences).
+Setup uses the existing provider defaults and settings. It explains processing destinations,
+checks prerequisites, opens Sound input settings, captures your chosen shortcuts, and records
+an actual test. Test results appear in setup; they are never pasted or copied automatically.
+**Save and continue** applies settings deliberately. Back and Leave retain edits in the open
+preferences window; closing preferences discards unsaved edits. Setup progress and successful
+completion are saved separately. Configured users keep their settings and are not forced into setup.
+
+Failed or interrupted processing keeps original audio on this computer in
+`$XDG_STATE_HOME/openwispr/failed-audio` (default `~/.local/state/openwispr/failed-audio`).
+The directory is private (0700); recordings are 0600 and uniquely named. Successful processing
+removes its audio; this is not a history archive. Older saved speech is never overwritten.
+
+The top-bar menu shows saved audio and offers **Retry oldest · copy result** and
+**Discard oldest saved audio**. Retry uses current saved provider settings and credentials.
+It only copies text, so you choose the destination. Discard immediately deletes the oldest
+saved recording. While processing, Retry and Discard are disabled; **Cancel processing · keep audio**
+keeps speech for later. Cancelling a recording before processing deletes that recording.
+Check your connection for network failures; check the key for authentication errors.
+After updating the extension and companion together, restart `openwispr-engine.service`
+when no dictation is active so the new recovery API is available.
+
+### D-Bus contracts
+
+Companion interface `io.github.tnfssc.OpenWispr.Recorder` retains `Start → b`,
+`Stop(b, s) → s`, `Cancel(s)` and `Status → (b, b)`. Added recovery calls are
+`RecoveryStatus → u` (saved count), `Retry(s) → s` (oldest audio, current config, async token),
+and `Discard → b` (oldest audio, idle only). Retry and Stop complete via
+`TranscriptionComplete(s token, s transcript, s error)`. Mutating calls remain restricted to
+GNOME Shell. Introspection is generated from the Go methods and tested alongside these signatures.
+
+Prefs uses the extension's existing control interface `org.gnome.Shell.Extensions.OpenWispr`:
+`TestStart(s session) → b`, `TestStop(s session) → b`, `TestCancel(s session) → b` and
+`TestState(s session, s state, s text, s error)`. The session identifies one safe test,
+so Back/leave/reopen cannot accept an abandoned result or cancel a newer recording. The extension routes test results to prefs, never insertion.
+No credentials are sent over these D-Bus interfaces.
+
 ## Testing
 
 Preferences Save regression test (requires GJS, GTK4, libadwaita and a display; uses an isolated memory settings backend):
 
 ```bash
-gjs -m test_preferences.js
+dbus-run-session -- gjs -m test_preferences.js
 ```
 
-LLM cleanup unit tests (request payload + response parsing):
+Engine lifecycle, retained audio, HTTP recovery, cancellation, interface, and cleanup tests:
 
 ```bash
-go test ./cmd/openwispr
+go test -race ./cmd/openwispr
+node --test test_recovery.js
+glib-compile-schemas --strict extension/schemas
+gjs -m test_schema_defaults.js
 ```
 
 Optional live LLM cleanup tests (requires explicit env vars and network access):

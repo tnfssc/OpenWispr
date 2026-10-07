@@ -15,9 +15,9 @@ const DISABLED = false;
 const ALLOWED_PASTE_METHODS = ['ctrl-v', 'ctrl-shift-v', 'shift-insert', 'clipboard-only'];
 
 // Exact key count asserted by settings.list_keys(). The schema XML defines
-// 32 keys; update this constant alongside the .xml when keys are added or
+// 35 keys; update this constant alongside the .xml when keys are added or
 // removed. A loose >= assertion would silently hide a missing key.
-const EXPECTED_KEY_COUNT = 32;
+const EXPECTED_KEY_COUNT = 35;
 
 // Load metadata.json
 const metadataPath = './extension/metadata.json';
@@ -150,6 +150,9 @@ try {
     const prompt = defaultValue(schema, 'llm-cleanup-prompt');
     assertTrue(prompt.length > 20, "'llm-cleanup-prompt' default is non-empty");
 
+    assertEqual(defaultValue(schema, 'setup-completed'), DISABLED, 'Setup completion default');
+    assertEqual(defaultValue(schema, 'setup-step'), 0, 'Setup progress default');
+    assertEqual(defaultValue(schema, 'setup-requested'), DISABLED, 'Setup menu request default');
     const keys = settings.list_keys();
     assertEqual(keys.length, EXPECTED_KEY_COUNT, `settings object exposes ${EXPECTED_KEY_COUNT} keys`);
 

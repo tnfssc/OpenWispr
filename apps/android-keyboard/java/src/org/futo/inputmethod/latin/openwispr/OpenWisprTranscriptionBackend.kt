@@ -166,19 +166,8 @@ class OpenWisprTranscriptionBackend(
             connection.outputStream.use(writeRequest)
             check(!cancelled) { "Dictation cancelled" }
             val status = connection.responseCode
-            val stream = if (status in 200..299) {
-                connection.inputStream
-            } else {
-                connection.errorStream ?: connection.inputStream
-            }
-            val body = stream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
-            if (status !in 200..299) {
-                val message = runCatching {
-                    JSONObject(body).optJSONObject("error")?.optString("message")
-                }.getOrNull().orEmpty().ifBlank { "Provider request failed ($status)" }
-                throw IOException(message)
-            }
-            return body
+            if (status !in 200..299) throw ProviderHttpException(status)
+            return connection.inputStream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
         } finally {
             activeConnection = null
             connection.disconnect()

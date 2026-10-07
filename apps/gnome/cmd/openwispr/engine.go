@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/godbus/dbus/v5"
+	"github.com/godbus/dbus/v5/introspect"
 )
 
 const (
@@ -122,9 +123,11 @@ type recorderEngine struct {
 	outputFile string
 	// ctx is cancelled on service shutdown so in-flight pipeline
 	// HTTP/subprocess calls abort promptly.
-	ctx     context.Context
-	conn    *dbus.Conn
-	cancels map[string]context.CancelFunc
+	ctx         context.Context
+	conn        *dbus.Conn
+	cancels     map[string]context.CancelFunc
+	recoveryDir string
+	pipeline    func(context.Context, string, pipelineConfig) (string, error)
 }
 
 func runEngine(conn *dbus.Conn) error {
@@ -147,6 +150,11 @@ func runEngine(conn *dbus.Conn) error {
 
 	engine := &recorderEngine{ctx: engineCtx, conn: conn, cancels: map[string]context.CancelFunc{}}
 	if err := conn.Export(engine, companionPath, companionInterface); err != nil {
+		return err
+	}
+
+	node := &introspect.Node{Name: string(companionPath), Interfaces: []introspect.Interface{{Name: companionInterface, Methods: introspect.Methods(engine), Signals: []introspect.Signal{{Name: "TranscriptionComplete", Args: []introspect.Arg{{Name: "token", Type: "s"}, {Name: "transcript", Type: "s"}, {Name: "error", Type: "s"}}}}}, introspect.IntrospectData}}
+	if err := conn.Export(introspect.NewIntrospectable(node), companionPath, "org.freedesktop.DBus.Introspectable"); err != nil {
 		return err
 	}
 
@@ -260,7 +268,7 @@ func (e *recorderEngine) Start(msg dbus.Message) (bool, *dbus.Error) {
 		return false, dbus.MakeFailedError(fmt.Errorf("ffmpeg not found"))
 	}
 
-	outputFile, err := createTempFile("openwispr_recording_*.wav")
+	outputFile, err := e.createRecording()
 	if err != nil {
 		return false, dbus.MakeFailedError(fmt.Errorf("create recorder temp file: %w", err))
 	}
@@ -304,6 +312,10 @@ func (e *recorderEngine) Stop(msg dbus.Message, transcribe bool, configJSON stri
 	if err := e.authorize(msg); err != nil {
 		return "", dbus.MakeFailedError(err)
 	}
+	return e.stop(transcribe, configJSON)
+}
+
+func (e *recorderEngine) stop(transcribe bool, configJSON string) (string, *dbus.Error) {
 	e.mu.Lock()
 	if !e.recording || e.recordCmd == nil {
 		e.mu.Unlock()
@@ -318,8 +330,7 @@ func (e *recorderEngine) Stop(msg dbus.Message, transcribe bool, configJSON stri
 	e.processing = true
 	e.mu.Unlock()
 
-	// Best-effort cleanup of the recording temp file on every return path.
-	defer os.Remove(inputPath)
+	// Durable store owns this audio until success or explicit discard.
 
 	token := fmt.Sprintf("%d", time.Now().UnixNano())
 	// Derive the per-token ctx from the engine ctx so Cancel() aborts the
@@ -335,49 +346,45 @@ func (e *recorderEngine) Stop(msg dbus.Message, transcribe bool, configJSON stri
 		_ = cmd.Process.Signal(syscall.SIGINT)
 	}
 
-	if err := waitCommand(cmd, recorderStopTimeout); err != nil {
-		if !isGracefulRecorderExit(err, inputPath) {
-			e.finishProcessing()
-			e.removeCancel(token)
-			return "", dbus.MakeFailedError(fmt.Errorf("stop recorder: %w", err))
-		}
-	}
-
+	stopErr := waitCommand(cmd, recorderStopTimeout)
 	if !transcribe {
+		// Explicitly abandoning recording deletes even if the recorder failed to flush.
+		deleteErr := os.Remove(inputPath)
 		e.finishProcessing()
 		e.removeCancel(token)
-		// No transcription requested — no signal. The caller resets state
-		// from the reply (token is non-empty, confirming the recorder stopped).
+		cancel()
+		if deleteErr != nil {
+			return "", dbus.MakeFailedError(deleteErr)
+		}
 		return token, nil
+	}
+	if stopErr != nil && !isGracefulRecorderExit(stopErr, inputPath) {
+		if info, err := os.Stat(inputPath); err == nil && info.Size() == 0 {
+			_ = os.Remove(inputPath)
+		}
+		e.finishProcessing()
+		e.removeCancel(token)
+		cancel()
+		return "", dbus.MakeFailedError(fmt.Errorf("stop recorder: %w", stopErr))
 	}
 
 	cfg, err := parsePipelineConfig(configJSON)
 	if err != nil {
 		e.finishProcessing()
 		e.removeCancel(token)
+		cancel()
 		return "", dbus.MakeFailedError(err)
 	}
 
-	go func() {
-		transcript, runErr := runPipeline(ctx, inputPath, cfg)
-		e.finishProcessing()
-		e.removeCancel(token)
-		errStr := ""
-		if runErr != nil {
-			errStr = runErr.Error()
-			log.Printf("openwispr pipeline failed for token %s: %v", token, runErr)
-		}
-		e.emitCompletion(token, transcript, errStr)
-	}()
+	e.process(ctx, cancel, token, inputPath, cfg)
 
 	return token, nil
 }
 
 // Cancel is the D-Bus method that cancels an in-flight transcription pipeline
 // identified by its token. It is a no-op if the token is unknown or the
-// pipeline has already completed. Full cancellation requires context
-// propagation into the pipeline (added separately); the method surface and
-// per-token cancel map are stable here.
+// pipeline has already completed. Processing cancellation keeps the durable
+// audio; only successful processing or explicit Discard removes it.
 func (e *recorderEngine) Cancel(msg dbus.Message, token string) *dbus.Error {
 	if err := e.authorize(msg); err != nil {
 		return dbus.MakeFailedError(err)

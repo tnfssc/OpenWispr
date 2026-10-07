@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 import OpenWisprCore
 
@@ -15,6 +16,18 @@ final class AppState: ObservableObject {
     directory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
       .appendingPathComponent("OpenWispr/PendingRecordings", isDirectory: true))
   private var processingTask: Task<Void, Never>?
+
+  let shortcutCapture = ShortcutCapture()
+  @Published private(set) var shortcutError = ""
+  let setupDictation = SetupDictation()
+  let setupProgress = OnboardingProgress()
+  private var setupWindow: SetupWindowController?
+  private var launchObservation: AnyCancellable?
+  private var terminationObservation: AnyCancellable?
+  private var setupObservation: AnyCancellable?
+  @Published private(set) var setupIsVisible = false
+  @Published private(set) var recordingStartPending = false
+  private var capturingShortcut = false
 
   let settings: SettingsStore
 
@@ -45,12 +58,52 @@ final class AppState: ObservableObject {
       }
     }
 
+    setupObservation = setupDictation.objectWillChange.sink { [weak self] _ in
+      self?.objectWillChange.send()
+    }
     configureHotkeys()
     syncStartAtLoginFromSystem()
+    launchObservation = NotificationCenter.default.publisher(
+      for: NSApplication.didFinishLaunchingNotification
+    )
+    .sink { [weak self] _ in
+      Task { @MainActor in
+        guard let self, self.setupProgress.shouldPresentAutomatically else { return }
+        self.openSetup()
+      }
+    }
+    terminationObservation = NotificationCenter.default.publisher(
+      for: NSApplication.willTerminateNotification
+    )
+    .sink { [weak self] _ in
+      MainActor.assumeIsolated { self?.setupDictation.terminate() }
+    }
+  }
+
+  func openSetup() {
+    setupIsVisible = true
+    if setupWindow == nil { setupWindow = SetupWindowController(appState: self) }
+    setupWindow?.showWindow(nil)
+    setupWindow?.window?.makeKeyAndOrderFront(nil)
+    NSApplication.shared.activate(ignoringOtherApps: true)
+  }
+
+  func closeSetup() { setupWindow?.close() }
+  func setupDidClose() { setupIsVisible = false }
+
+  func setShortcutCapture(_ active: Bool) {
+    capturingShortcut = active
+    if active { hotkeys.suspend() } else { configureHotkeys() }
+  }
+
+  var canStartSetupTest: Bool {
+    !isRecording && !isProcessing && !recordingStartPending && !capturingShortcut
   }
 
   var statusIconName: String {
-    switch phase {
+    if setupDictation.phase == .recording { return "record.circle.fill" }
+    if setupDictation.phase == .processing { return "hourglass" }
+    return switch phase {
     case .idle:
       "mic"
     case .recording:
@@ -63,7 +116,10 @@ final class AppState: ObservableObject {
   }
 
   var statusLabel: String {
-    switch phase {
+    if setupDictation.phase == .requesting { return "Waiting for test microphone" }
+    if setupDictation.phase == .recording { return "Test recording" }
+    if setupDictation.phase == .processing { return "Test: \(setupDictation.processingLabel)" }
+    return switch phase {
     case .idle:
       "Idle"
     case .recording:
@@ -109,20 +165,25 @@ final class AppState: ObservableObject {
   }
 
   func toggleRecording(source: RecordingTrigger = .toggle) {
+    guard !setupDictation.isBusy && !recordingStartPending && !capturingShortcut else { return }
     switch phase {
     case .idle:
+      guard !setupIsVisible else { return }
       startRecording(trigger: source)
     case .recording:
       stopRecording(transcribe: true)
     case .processing:
       break
     case .error:
+      guard !setupIsVisible else { return }
       phase = .idle
       startRecording(trigger: source)
     }
   }
 
   func startRecording(trigger: RecordingTrigger) {
+    guard !setupIsVisible else { return }
+    guard !setupDictation.isBusy && !recordingStartPending && !capturingShortcut else { return }
     guard case .idle = phase else {
       return
     }
@@ -130,7 +191,9 @@ final class AppState: ObservableObject {
     lastError = ""
     pendingPasteTargetPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
 
+    recordingStartPending = true
     Task {
+      defer { recordingStartPending = false }
       let granted = await recorder.requestMicrophoneAccess()
       guard granted else {
         setError("Microphone permission denied")
@@ -181,13 +244,17 @@ final class AppState: ObservableObject {
   }
 
   func retrySavedRecording() {
-    guard !isProcessing, !isRecording, let url = savedRecordings.first else { return }
+    guard !setupDictation.isBusy, !recordingStartPending, !isProcessing, !isRecording,
+      let url = savedRecordings.first
+    else { return }
     pendingPasteTargetPID = nil
     processRecording(url, trigger: .menu, manualRetry: true)
   }
 
   func discardSavedRecording() {
-    guard !isProcessing, !isRecording, let url = savedRecordings.first else { return }
+    guard !setupDictation.isBusy, !recordingStartPending, !isProcessing, !isRecording,
+      let url = savedRecordings.first
+    else { return }
     do {
       try recordingStore.remove(url)
       savedRecordings.removeAll { $0 == url }
@@ -224,7 +291,8 @@ final class AppState: ObservableObject {
         try recordingStore.remove(url)
         savedRecordings.removeAll { $0 == url }
         await handleTranscript(
-          text, settings: snapshot, trigger: trigger, allowAutoPaste: !manualRetry)
+          text, settings: snapshot, trigger: trigger,
+          allowAutoPaste: (manualRetry ? TranscriptDelivery.recovery : .dictation).allowsAutoPaste)
       } catch {
         if Task.isCancelled {
           setError("Transcription canceled. Your recording is saved.")
@@ -376,6 +444,7 @@ final class AppState: ObservableObject {
   }
 
   private func configureHotkeys() {
+    guard !capturingShortcut else { return }
     do {
       try hotkeys.register(
         toggleShortcut: settings.toggleShortcut,
@@ -397,7 +466,9 @@ final class AppState: ObservableObject {
           }
         }
       )
+      shortcutError = ""
     } catch {
+      shortcutError = error.localizedDescription
       setError(error.localizedDescription)
     }
   }

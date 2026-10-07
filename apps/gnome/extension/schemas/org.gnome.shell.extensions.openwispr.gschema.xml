@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
   <schema id="org.gnome.shell.extensions.openwispr" path="/org/gnome/shell/extensions/openwispr/">
+    <key name="setup-completed" type="b"><default>false</default><summary>Completed a successful setup test</summary></key>
+    <key name="setup-step" type="i"><default>0</default><range min="0" max="3"/><summary>Saved setup progress</summary></key>
+    <key name="setup-requested" type="b"><default>false</default><summary>Open setup from the top-bar menu</summary></key>
     <key name="hold-to-speak-enabled" type="b">
       <default>true</default>
       <summary>Enable hold to speak mode</summary>

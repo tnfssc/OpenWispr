@@ -6,6 +6,12 @@ struct SettingsView: View {
 
   var body: some View {
     Form {
+      Section("Get Started") {
+        Button("Set up OpenWispr…") { appState.openSetup() }
+        Text("Check permissions, choose shortcuts, and try dictation without pasting.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
       Section("Recording And Shortcuts") {
         LabeledContent("Toggle Shortcut") {
           TextField("<Control><Option>R", text: $settings.toggleShortcut)
