@@ -19,10 +19,12 @@ final class ShortcutCapture: ObservableObject {
     appState.setShortcutCapture(true)
     monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) {
       [weak self] event in
-      MainActor.assumeIsolated {
-        guard let self else { return event }
-        return self.receive(event)
+      // Keep the non-Sendable event in AppKit's callback; return only a decision.
+      let consume = MainActor.assumeIsolated {
+        guard let self else { return false }
+        return self.receive(event) == nil
       }
+      return consume ? nil : event
     }
   }
 

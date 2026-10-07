@@ -32,3 +32,9 @@ macOS runtime checks remain required for system permission prompts, Carbon confl
 4. Capture toggle/hold, Escape/cancel/close mid-capture, use Right Option, try a conflicting shortcut. Confirm global handlers resume and no recording begins during capture.
 5. Dictate a real test with a sentinel clipboard and a text editor behind setup. Confirm neither changes, and real text appears in setup. Fail the network, retry/discard only the test, cancel during processing, and leave while recording.
 6. Keep a pending normal dictation and a live normal recording while opening setup. Test must wait for live work, and the pending dictation must survive. Normal retry remains copy-only. Close during test processing and reopen to see its result.
+
+## Native CI follow-up for PR #5
+
+Native macOS CI on 784eddacc reached app compilation and rejected ShortcutCapture's MainActor.assumeIsolated return: NSEvent is explicitly non-Sendable, while the helper's result must be Sendable. Linux syntax/logic harnesses could not find this SDK constraint. The local AppKit monitor now asks the actor for a Bool consume decision and returns the original NSEvent or nil outside the helper. No unchecked Sendable conformance or detached event handoff was added. Passthrough and consume behavior stay the same.
+
+Native CI must pass on the fixed commit before merge. Manual permission/window/real-speech checks remain release limits even when compilation/tests pass. Values stay unchanged; this SDK-specific lesson belongs with shortcut capture.
