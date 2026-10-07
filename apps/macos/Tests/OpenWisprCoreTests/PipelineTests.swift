@@ -49,6 +49,16 @@ private final class StubProtocol: URLProtocol, @unchecked Sendable {
   }
 }
 
+// URLSession cancellation completes before URLProtocol necessarily reports stopLoading.
+// Wait for that callback, bounded so a missing cancellation still fails the assertion.
+private func waitForProtocolStops(_ key: String, count: Int) async throws {
+  let clock = ContinuousClock()
+  let deadline = clock.now.advanced(by: .seconds(2))
+  while StubProtocol.state.count(key) < count && clock.now < deadline {
+    try await Task.sleep(for: .milliseconds(10))
+  }
+}
+
 private func testSettings(endpoint: String) -> SettingsSnapshot {
   SettingsSnapshot(
     holdToSpeakEnabled: false,
@@ -147,6 +157,7 @@ private func testAudio() throws -> URL {
     #expect(error is TranscriptionTimeout)
   }
   #expect(StubProtocol.state.count("/hang") == 1)
+  try await waitForProtocolStops("stopped/hang", count: 1)
   #expect(StubProtocol.state.count("stopped/hang") == 1)
   #expect(FileManager.default.fileExists(atPath: url.path))
 }
@@ -175,6 +186,7 @@ private func testAudio() throws -> URL {
     #expect(error is TranscriptionTimeout || (error as? URLError)?.code == .timedOut)
   }
   #expect(StubProtocol.state.count("/request-hang") == 3)
+  try await waitForProtocolStops("stopped/request-hang", count: 3)
   #expect(StubProtocol.state.count("stopped/request-hang") == 3)
   #expect(FileManager.default.fileExists(atPath: url.path))
 }
