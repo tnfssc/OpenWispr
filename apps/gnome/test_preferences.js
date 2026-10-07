@@ -43,10 +43,12 @@ try {
         'class ExtensionPreferences {}\nconst _ = text => text;'));
     const { default: Preferences } = await import(`file://${directory}/prefs.js`);
     const prefs = new Preferences();
-    prefs.getSettings = () => draft;
+    let settingsCalls = 0;
+    prefs.getSettings = () => settingsCalls++ === 0 ? draft : saved;
     const window = new Adw.PreferencesWindow();
     prefs.fillPreferencesWindow(window);
 
+    assert(prefs._setupIdle !== null && prefs._setupIdle !== undefined, 'A new unconfigured user is offered setup');
     const find = predicate => [...widgets(window)].find(predicate);
     const row = title => find(widget => widget instanceof Adw.PreferencesRow && widget.title === title);
     const button = (root, label) => [...widgets(root)].find(widget =>
@@ -104,14 +106,99 @@ try {
     model.text = 'second-model';
     save.emit('clicked');
     assert(saved.get_string('stt-groq-model') === 'second-model', 'Repeated saves commit new edits');
+    // The wizard moves the same native controls, never creates divergent copies.
+    if (prefs._setupIdle) { GLib.source_remove(prefs._setupIdle); prefs._setupIdle = null; }
+    prefs._openSetup(window);
+    assert(prefs._setupStep === 0, 'Setup begins with provider/privacy');
+    const wizard = prefs._setupWindow;
+    assert(wizard !== null && prefs._setupProviderGroups[0].get_parent() !== null, 'Wizard attaches existing provider controls');
+    model.text = 'wizard-draft';
+    prefs._showSetupStep(1);
+    assert(saved.get_string('stt-groq-model') === 'second-model', 'Moving steps does not secretly save edits');
+    prefs._setupBack.emit('clicked');
+    assert(prefs._setupStep === 0 && model.text === 'wizard-draft', 'Back retains provider edits');
+    prefs._setupNext.emit('clicked');
+    assert(saved.get_string('stt-groq-model') === 'wizard-draft' && prefs._setupStep === 1, 'Save and continue deliberately applies edits');
+    prefs._setupNext.emit('clicked');
+    assert(prefs._setupStep === 2, 'Microphone step continues without hidden installs');
+    prefs._setupNext.emit('clicked');
+    assert(prefs._setupStep === 3 && !prefs._setupNext.sensitive, 'Completion requires a real result');
+    prefs._leaveSetup();
+    assert(prefs._setupWindow === null && prefs._setupProviderGroups[0].get_parent() !== null, 'Leave restores settings controls');
+    saved.set_boolean('setup-requested', true);
+    assert(prefs._setupWindow !== null && !saved.get_boolean('setup-requested'), 'Top-bar setup request reopens existing preferences');
+    assert(prefs._setupStep === 3, 'Reopen resumes durable progress');
+    assert(!prefs._setupNext.sensitive, 'Reopening does not invent a successful test');
+
+    // Exercise actual asynchronous preferences D-Bus routing on an isolated bus.
+    const conn = Gio.DBus.session;
+    const apiXML = '<node><interface name="org.gnome.Shell.Extensions.OpenWispr"><method name="TestStart"><arg type="s" direction="in"/><arg type="b" direction="out"/></method><method name="TestStop"><arg type="s" direction="in"/><arg type="b" direction="out"/></method><method name="TestCancel"><arg type="s" direction="in"/><arg type="b" direction="out"/></method><signal name="TestState"><arg type="s"/><arg type="s"/><arg type="s"/><arg type="s"/></signal></interface></node>';
+    let startCalls = 0;
+    let stopCalls = 0;
+    const emitState = (session, state, text = '') => GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+        mock.emit_signal('TestState', new GLib.Variant('(ssss)', [session, state, text, '']));
+        return GLib.SOURCE_REMOVE;
+    });
+    const mock = Gio.DBusExportedObject.wrapJSObject(apiXML, {
+        TestStart: session => { startCalls++; emitState(session, 'recording'); return true; },
+        TestStop: session => { stopCalls++; emitState(session, 'result', 'This is my first dictation.'); return true; },
+        TestCancel: session => { emitState(session, 'idle'); return true; },
+    });
+    mock.export(conn, '/org/gnome/Shell/Extensions/OpenWispr');
+    let owner;
+    await new Promise(resolve => { owner = Gio.bus_own_name_on_connection(conn, 'org.gnome.Shell.Extensions.OpenWispr', Gio.BusNameOwnerFlags.NONE, resolve, () => {}); });
+    const waitFor = predicate => new Promise((resolve, reject) => {
+        let attempts = 0;
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 10, () => {
+            if (predicate()) { resolve(); return GLib.SOURCE_REMOVE; }
+            if (++attempts > 300) { reject(new Error('Timed out waiting for wizard D-Bus state')); return GLib.SOURCE_REMOVE; }
+            return GLib.SOURCE_CONTINUE;
+        });
+    });
+    prefs._testStartButton.emit('clicked');
+    await waitFor(() => prefs._testStopButton.sensitive);
+    const abandonedSession = prefs._setupTestSession;
+    prefs._setupBack.emit('clicked');
+    prefs._setupNext.emit('clicked');
+    assert(prefs._setupStep === 3 && prefs._testStartButton.sensitive, 'Back cancellation cannot strand a reopened test in busy state');
+    emitState(abandonedSession, 'result', 'Stale words');
+    await new Promise(resolve => GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => { resolve(); return GLib.SOURCE_REMOVE; }));
+    assert(!prefs._setupTestPassed && !prefs._setupNext.sensitive && prefs._testResult.label === '', 'An abandoned test cannot complete later setup');
+    prefs._testStartButton.emit('clicked');
+    await waitFor(() => prefs._testStopButton.sensitive);
+    assert(startCalls === 2 && !prefs._testStartButton.sensitive && prefs._testCancelButton.sensitive, 'Actual test Start requests recording and exposes Cancel');
+    assert(!prefs._setupNext.sensitive, 'Recording is not successful completion');
+    prefs._testStopButton.emit('clicked');
+    await waitFor(() => prefs._setupTestPassed);
+    assert(stopCalls === 1 && prefs._testResult.label === 'This is my first dictation.', 'Actual Stop response shows a selectable result');
+    assert(prefs._testCopyButton.sensitive && prefs._setupNext.sensitive, 'Success enables deliberate Copy and Finish');
+    prefs._setupNext.emit('clicked');
+    assert(saved.get_boolean('setup-completed') && saved.get_int('setup-step') === 0, 'Finish saves completion and clears resume step');
+    mock.unexport(); Gio.bus_unown_name(owner);
+    prefs._openSetup(window);
+    assert(prefs._setupStep === 0, 'Completed setup remains reopenable');
+    model.text = 'leave-with-edits';
+    prefs._leaveSetup();
+    assert(model.text === 'leave-with-edits' && saved.get_string('stt-groq-model') === 'wizard-draft', 'Leave does not lose drafts or silently save them');
     notifications.active = oldNotifications;
     model.text = 'discard-this-model';
     window.emit('close-request');
     assert(saved.get_boolean('notifications-enabled') === !oldNotifications, 'Closing discards staged switches');
-    assert(saved.get_string('stt-groq-model') === 'second-model', 'Closing discards unsaved text');
+    assert(saved.get_string('stt-groq-model') === 'wizard-draft', 'Closing discards unsaved text');
     assert(!draft.get_has_unapplied(), 'Closing clears staged changes');
     window.destroy();
-    print('PASS: Preferences Save, validation, repeated saves and discard behavior.');
+    const configuredBackend = Gio.memory_settings_backend_new();
+    const existing = new Gio.Settings({settings_schema: schema, backend: configuredBackend});
+    existing.set_string('stt-groq-api-key', 'existing-user-key');
+    existing.set_strv('toggle-recording', ['<Super>v']);
+    const existingPrefs = new Preferences();
+    existingPrefs.getSettings = () => new Gio.Settings({settings_schema: schema, backend: configuredBackend});
+    const existingWindow = new Adw.PreferencesWindow();
+    existingPrefs.fillPreferencesWindow(existingWindow);
+    assert(!existingPrefs._setupIdle && !existingPrefs._setupWindow, 'Configured users are not forced into setup');
+    assert(existing.get_string('stt-groq-api-key') === 'existing-user-key' && existing.get_strv('toggle-recording')[0] === '<Super>v', 'Existing settings survive first-run logic');
+    existingWindow.emit('close-request'); existingWindow.destroy();
+    print('PASS: Preferences Save, validation, wizard Back/leave/reopen, D-Bus test result, and saved completion.');
 } finally {
     for (const file of files)
         GLib.unlink(`${directory}/${file}`);
