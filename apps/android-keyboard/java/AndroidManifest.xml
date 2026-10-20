@@ -63,6 +63,17 @@
                  android:resource="@xml/method"/>
         </service>
 
+        <service android:name=".openwispr.FloatingMicService"
+             android:label="@string/openwispr_floating_mic_title"
+             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+             android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService"/>
+            </intent-filter>
+            <meta-data android:name="android.accessibilityservice"
+                 android:resource="@xml/openwispr_floating_mic"/>
+        </service>
+
         <!--
         <service android:name=".spellcheck.AndroidSpellCheckerService"
              android:label="@string/spell_checker_service_name"

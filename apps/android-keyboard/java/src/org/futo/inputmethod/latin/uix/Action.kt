@@ -149,6 +149,9 @@ abstract class ActionWindow {
         }
     }
 
+    /** A key was pressed while this window's input transaction swallows key events. */
+    open fun onKeyPressedDuringInputTransaction() {}
+
     open fun close(): CloseResult {
         return CloseResult.Default
     }

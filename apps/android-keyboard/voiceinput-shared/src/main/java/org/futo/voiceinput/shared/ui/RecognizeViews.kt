@@ -5,6 +5,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
@@ -23,6 +24,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableFloatState
 import androidx.compose.runtime.MutableState
@@ -151,6 +153,42 @@ fun InnerRecognize(
     }
 }
 
+
+/** One-row recognizer that sits above the keyboard instead of replacing it. */
+@Composable
+fun InnerRecognizeCompact(
+    magnitude: MutableFloatState = mutableFloatStateOf(0.5f),
+    state: MutableState<MagnitudeState> = mutableStateOf(MagnitudeState.MIC_MAY_BE_BLOCKED),
+    processing: Boolean = false,
+    animated: Boolean = true,
+    onFinish: () -> Unit = {},
+) {
+    val finishLabel = stringResource(R.string.stop_recording)
+    Row(
+        Modifier.fillMaxSize().padding(horizontal = 12.dp).clickable(
+            enabled = !processing,
+            role = Role.Button,
+            onClickLabel = finishLabel,
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+            onClick = onFinish,
+        ),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        OpenWisprLogo(Modifier.size(44.dp), magnitude.floatValue, processing, animated)
+        Text(
+            when {
+                processing -> stringResource(R.string.transcribing)
+                state.value == MagnitudeState.MIC_MAY_BE_BLOCKED -> stringResource(R.string.microphone_unavailable)
+                else -> stringResource(R.string.listening)
+            },
+            modifier = Modifier.weight(1f).padding(horizontal = 12.dp).semantics { liveRegion = LiveRegionMode.Polite },
+            fontSize = 16.sp,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        if (!processing) TextButton(onClick = onFinish) { Text(finishLabel) }
+    }
+}
 
 @Composable
 fun ColumnScope.RecognizeLoadingCircle(text: String = "Initializing...") {

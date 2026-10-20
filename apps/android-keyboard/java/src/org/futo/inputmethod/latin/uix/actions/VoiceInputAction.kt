@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.material3.Button
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
@@ -16,6 +18,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.traversalIndex
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -34,7 +38,7 @@ import org.futo.inputmethod.latin.uix.ENABLE_SOUND
 import org.futo.inputmethod.latin.uix.KeyboardManagerForAction
 import org.futo.inputmethod.latin.uix.PREFER_BLUETOOTH
 import org.futo.inputmethod.latin.uix.PersistentActionState
-import org.futo.inputmethod.latin.uix.USE_VAD_AUTOSTOP
+import org.futo.inputmethod.latin.uix.VAD_SILENCE_TIMEOUT_MS
 import org.futo.inputmethod.latin.uix.getSetting
 import org.futo.inputmethod.latin.uix.setSetting
 import org.futo.inputmethod.latin.uix.settings.SettingsActivity
@@ -102,6 +106,12 @@ private class VoiceInputActionWindow(
     private val recovering = mutableStateOf(failedSpeech.exists())
     private val failure = mutableStateOf<String?>(null)
 
+    // Dictation runs in a strip above the keyboard so the user keeps their place; recovery
+    // needs the full panel for its controls.
+    private val inline = !recovering.value
+    override val onlyShowAboveKeyboard: Boolean get() = inline
+    override val fixedWindowHeight: Dp? get() = if (inline) 64.dp else null
+
     private fun localPreview(): AudioPreview? {
         if (Build.VERSION.SDK_INT < 33) return null
         val language = config.language.trim().ifBlank {
@@ -125,7 +135,7 @@ private class VoiceInputActionWindow(
                 preferBluetoothMic = context.getSetting(PREFER_BLUETOOTH),
                 requestAudioFocus = context.getSetting(AUDIO_FOCUS),
                 canExpandSpace = context.getSetting(CAN_EXPAND_SPACE),
-                useVADAutoStop = context.getSetting(USE_VAD_AUTOSTOP),
+                silenceTimeoutMs = context.getSetting(VAD_SILENCE_TIMEOUT_MS),
             ),
         )
     }
@@ -160,7 +170,17 @@ private class VoiceInputActionWindow(
                 .semantics { traversalIndex = -1.0f },
         ) {
             Box(modifier = Modifier.align(Alignment.Center)) {
-                if (recovering.value) {
+                if (recovering.value && inline) {
+                    // The strip is too small for recovery controls; reopen as the full panel.
+                    Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(failure.value ?: "Transcription failed.", Modifier.weight(1f),
+                            maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        TextButton(onClick = {
+                            manager.closeActionWindow()
+                            manager.activateAction(VoiceInputAction)
+                        }) { Text("Recover") }
+                    }
+                } else if (recovering.value) {
                     SpeechRecoveryControls(
                         store = failedSpeech,
                         onResolved = { manager.closeActionWindow() },
@@ -172,12 +192,19 @@ private class VoiceInputActionWindow(
                         },
                     )
                 } else if (failure.value != null) {
-                    Text(failure.value!!, Modifier.padding(16.dp))
+                    Text(failure.value!!, Modifier.padding(horizontal = 16.dp),
+                        maxLines = 3, overflow = TextOverflow.Ellipsis)
                 } else {
-                    recognizerView.value?.Content()
+                    recognizerView.value?.Content(compact = inline)
                 }
             }
         }
+    }
+
+    // Keys stay visible beside the inline strip but can't type mid-transaction; treat a key as
+    // "done talking" so it is never silently dropped.
+    override fun onKeyPressedDuringInputTransaction() {
+        recognizerView.value?.finish()
     }
 
     override fun close(): CloseResult {
