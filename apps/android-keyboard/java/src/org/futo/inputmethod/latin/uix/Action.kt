@@ -69,6 +69,7 @@ interface KeyboardManagerForAction {
 
     fun closeActionWindow()
     fun forceActionWindowAboveKeyboard(to: Boolean)
+    fun keepScreenAwake(on: Boolean)
 
     fun triggerSystemVoiceInput()
 
@@ -149,9 +150,6 @@ abstract class ActionWindow {
         }
     }
 
-    /** A key was pressed while this window's input transaction swallows key events. */
-    open fun onKeyPressedDuringInputTransaction() {}
-
     open fun close(): CloseResult {
         return CloseResult.Default
     }
@@ -197,6 +195,9 @@ data class Action(
 
     val settingsMenu: UserSettingsMenu? = null,
     val tintIcon: Boolean = true,
+
+    /** Draws the action's button in the toolbar in place of [icon], e.g. to show live state. */
+    val iconContent: (@Composable (Modifier) -> Unit)? = null,
 )
 
 data class LangSpecAction(

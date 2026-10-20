@@ -1,17 +1,18 @@
 ---
 name: Floating mic can hide the keyboard
-description: Voice-only mode uses the accessibility SoftKeyboardController, and only where the bubble can replace the keyboard
+description: Voice-only mode keeps the keyboard hidden regardless of focus, except in password fields
 ---
 The user wanted to stop the keyboard popping up while typing by voice. The bubble's long-press menu has
 "Hide keyboard", which calls `softKeyboardController.setShowMode(SHOW_MODE_HIDDEN)`; no extra
 accessibility flag is needed.
 
-Hiding applies only while the bubble is shown for the focused field. Password fields, fields the bubble
-was hidden for, screens with no recognisable editable field, and the bubble being switched off all set
-`SHOW_MODE_AUTO`, so the user can never end up with neither keyboard nor bubble (OpenWispr is their
-primary keyboard). The service also resets the mode in `onDestroy`, and Android resets it when the
-service is disabled.
+The first version dropped back to `SHOW_MODE_AUTO` whenever no editable field was focused. The user
+saw the keyboard flash up for a moment on every tap into a field, so the hidden mode no longer depends
+on focus. Only a focused password field brings the keyboard back. Lock-out is avoided because the
+bubble is always on screen and its menu has "Show keyboard".
 
-Checked on the API 36 emulator: no keyboard flash when entering a screen with an auto-focused field.
-After "Show keyboard", an already-focused field needs a tap to bring the keyboard back; the service
-cannot force the IME open.
+Restoring the keyboard is not enough on Android 16: the app focused while hidden still believes its
+show request worked and ignores taps ("onCancelled at PHASE_CLIENT_REPORT_REQUESTED_VISIBLE_TYPES").
+Even an IME `requestShowSelf` is cancelled the same way. `KeyboardBridge` (same process) has OpenWispr's
+IME call `requestHideSelf` and then `requestShowSelf`, which resets the app's state and shows the
+keyboard at once. This only helps while OpenWispr is the active keyboard.

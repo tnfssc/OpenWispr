@@ -60,6 +60,7 @@ import org.futo.inputmethod.engine.ExpandableSuggestionBarConfiguration
 import org.futo.inputmethod.engine.IMEManager
 import org.futo.inputmethod.engine.general.WordLearner
 import org.futo.inputmethod.latin.SuggestedWords.SuggestedWordInfo
+import org.futo.inputmethod.latin.openwispr.KeyboardBridge
 import org.futo.inputmethod.latin.common.Constants
 import org.futo.inputmethod.latin.settings.Settings
 import org.futo.inputmethod.latin.uix.BasicThemeProvider
@@ -382,6 +383,7 @@ class LatinIME : InputMethodServiceCompose(), LatinIMELegacy.SuggestionStripCont
 
     override fun onCreate() {
         super.onCreate()
+        KeyboardBridge.attach(this)
 
         UserBinaryDictionary.resetUserDictionariesRequiringRecreation()
 
@@ -504,6 +506,7 @@ class LatinIME : InputMethodServiceCompose(), LatinIMELegacy.SuggestionStripCont
 
     private var destroying = false
     override fun onDestroy() {
+        KeyboardBridge.detach(this)
         destroying = true
         unregisterReceiver(unlockReceiver)
         stopJobs()

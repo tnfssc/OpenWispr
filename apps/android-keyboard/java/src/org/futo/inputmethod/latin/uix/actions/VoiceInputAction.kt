@@ -1,58 +1,52 @@
 package org.futo.inputmethod.latin.uix.actions
 
+import android.content.Intent
 import android.os.Build
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Text
 import androidx.compose.material3.Button
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.traversalIndex
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.yield
 import org.futo.inputmethod.latin.R
+import org.futo.inputmethod.latin.openwispr.FailedSpeechStore
 import org.futo.inputmethod.latin.openwispr.OpenWisprConfig
 import org.futo.inputmethod.latin.openwispr.OpenWisprConfigStore
 import org.futo.inputmethod.latin.openwispr.OpenWisprTranscriptionBackend
-import org.futo.inputmethod.latin.uix.ANIMATE_BUBBLE
+import org.futo.inputmethod.latin.openwispr.RecoverableSpeechBackend
+import org.futo.inputmethod.latin.openwispr.SpeechRecoveryControls
 import org.futo.inputmethod.latin.uix.AUDIO_FOCUS
 import org.futo.inputmethod.latin.uix.Action
+import org.futo.inputmethod.latin.uix.ActionInputTransaction
 import org.futo.inputmethod.latin.uix.ActionWindow
 import org.futo.inputmethod.latin.uix.CAN_EXPAND_SPACE
-import org.futo.inputmethod.latin.uix.CloseResult
 import org.futo.inputmethod.latin.uix.ENABLE_SOUND
 import org.futo.inputmethod.latin.uix.KeyboardManagerForAction
 import org.futo.inputmethod.latin.uix.PREFER_BLUETOOTH
-import org.futo.inputmethod.latin.uix.PersistentActionState
 import org.futo.inputmethod.latin.uix.VAD_SILENCE_TIMEOUT_MS
 import org.futo.inputmethod.latin.uix.getSetting
 import org.futo.inputmethod.latin.uix.setSetting
 import org.futo.inputmethod.latin.uix.settings.SettingsActivity
 import org.futo.inputmethod.latin.uix.utils.ModelOutputSanitizer
-import org.futo.voiceinput.shared.RecognizerView
-import org.futo.voiceinput.shared.RecognizerViewListener
-import org.futo.voiceinput.shared.RecognizerViewSettings
+import org.futo.voiceinput.shared.AudioPreview
+import org.futo.voiceinput.shared.AudioRecognizer
+import org.futo.voiceinput.shared.AudioRecognizerSettings
+import org.futo.voiceinput.shared.OnDeviceSpeechPreview
 import org.futo.voiceinput.shared.RecordingSettings
 import org.futo.voiceinput.shared.SoundPlayer
-import org.futo.voiceinput.shared.OnDeviceSpeechPreview
-import org.futo.inputmethod.latin.openwispr.FailedSpeechStore
-import org.futo.inputmethod.latin.openwispr.RecoverableSpeechBackend
-import org.futo.inputmethod.latin.openwispr.SpeechRecoveryControls
-import org.futo.voiceinput.shared.AudioPreview
+import org.futo.voiceinput.shared.types.AudioRecognizerListener
+import org.futo.voiceinput.shared.types.InferenceState
+import org.futo.voiceinput.shared.types.Language
+import org.futo.voiceinput.shared.types.MagnitudeState
 import org.futo.voiceinput.shared.ui.MicrophoneDeviceState
 
 val SystemVoiceInputAction = Action(
@@ -64,16 +58,170 @@ val SystemVoiceInputAction = Action(
     shownInEditor = false,
 )
 
-class VoiceInputPersistentState(manager: KeyboardManagerForAction) : PersistentActionState {
-    val soundPlayer = SoundPlayer(manager.getContext())
+/**
+ * Dictation in place: the voice key itself shows that it is listening, and nothing else on screen
+ * moves. Tap to start, tap again (or press any key) to stop and insert.
+ */
+object InlineDictation {
+    enum class Phase { Idle, Recording, Processing }
 
-    override suspend fun cleanUp() = Unit
-    override fun close() = Unit
+    /** Read by the voice key's icon. */
+    val phase = mutableStateOf(Phase.Idle)
+    val level = mutableFloatStateOf(0f)
+
+    /** Failure to explain when the voice panel opens after a dictation could not be transcribed. */
+    internal var pendingFailure: String? = null
+
+    private var session: Session? = null
+    private var soundPlayer: SoundPlayer? = null
+
+    fun toggle(manager: KeyboardManagerForAction) {
+        session?.let {
+            it.finish()
+            return
+        }
+        val context = manager.getContext()
+        val config = OpenWisprConfigStore.load(context)
+        // Locked devices, setup and recovering a failed recording need room for an explanation.
+        if (manager.isDeviceLocked() || !config.isConfigured || FailedSpeechStore(context.noBackupFilesDir).exists()) {
+            manager.activateAction(VoiceInputPanelAction)
+            return
+        }
+        val sounds = soundPlayer ?: SoundPlayer(context.applicationContext).also { soundPlayer = it }
+        session = Session(manager, config, sounds).also { it.start() }
+    }
+
+    /** A key typed mid-dictation can't reach the field, so it means "done talking" instead. */
+    fun onKeyPressed() {
+        session?.finish()
+    }
+
+    /** The field or keyboard went away; the transaction is no longer valid. */
+    fun cancel() {
+        session?.cancel()
+    }
+
+    private class Session(
+        private val manager: KeyboardManagerForAction,
+        config: OpenWisprConfig,
+        private val sounds: SoundPlayer,
+    ) : AudioRecognizerListener {
+        private val context = manager.getContext()
+        private val failedSpeech = FailedSpeechStore(context.noBackupFilesDir)
+        private val playSounds = context.getSetting(ENABLE_SOUND)
+        private val transaction: ActionInputTransaction = manager.createInputTransaction()
+        private var failure: String? = null
+        private var done = false
+
+        private val recognizer = AudioRecognizer(
+            context = context,
+            lifecycleScope = manager.getLifecycleScope(),
+            listener = this,
+            settings = AudioRecognizerSettings(
+                transcriptionBackend = RecoverableSpeechBackend(OpenWisprTranscriptionBackend(config), failedSpeech) {
+                    failure = it
+                },
+                recordingConfiguration = RecordingSettings(
+                    preferBluetoothMic = context.getSetting(PREFER_BLUETOOTH),
+                    requestAudioFocus = context.getSetting(AUDIO_FOCUS),
+                    canExpandSpace = context.getSetting(CAN_EXPAND_SPACE),
+                    silenceTimeoutMs = context.getSetting(VAD_SILENCE_TIMEOUT_MS),
+                ),
+                livePreview = localPreview(config),
+            ),
+        )
+
+        private fun localPreview(config: OpenWisprConfig): AudioPreview? {
+            if (Build.VERSION.SDK_INT < 33) return null
+            val language = config.language.trim().ifBlank {
+                manager.getActiveLocales().firstOrNull()?.toLanguageTag() ?: java.util.Locale.getDefault().toLanguageTag()
+            }
+            return OnDeviceSpeechPreview(context, manager.getLifecycleScope(), language, ::partialResult)
+        }
+
+        fun start() {
+            // Show the listening state at once; the mic takes a moment to open.
+            phase.value = Phase.Recording
+            level.floatValue = 0f
+            manager.keepScreenAwake(true)
+            recognizer.start()
+        }
+
+        fun finish() = recognizer.finish()
+
+        fun cancel() = recognizer.cancel()
+
+        private fun end() {
+            done = true
+            phase.value = Phase.Idle
+            level.floatValue = 0f
+            manager.keepScreenAwake(false)
+            if (session === this) session = null
+        }
+
+        override fun recordingStarted(device: MicrophoneDeviceState) {
+            if (playSounds) sounds.playStartSound()
+            if (device.bluetoothAvailable) {
+                manager.getLifecycleScope().launch { context.setSetting(PREFER_BLUETOOTH, device.bluetoothActive) }
+            }
+        }
+
+        override fun updateMagnitude(magnitude: Float, state: MagnitudeState) {
+            level.floatValue = magnitude
+        }
+
+        override fun processing() {
+            phase.value = Phase.Processing
+        }
+
+        override fun partialResult(result: String) {
+            if (done) return
+            transaction.updatePartial(ModelOutputSanitizer.sanitize(result, transaction.textContext))
+        }
+
+        override fun finished(result: String) {
+            if (done) return
+            val sanitized = ModelOutputSanitizer.sanitize(result, transaction.textContext)
+            if (sanitized.isBlank()) transaction.discardPartial() else transaction.commit(sanitized)
+            manager.announce(result)
+            end()
+        }
+
+        override fun cancelled() {
+            if (done) return
+            if (playSounds) sounds.playCancelSound()
+            transaction.discardPartial()
+            end()
+        }
+
+        override fun modelLoadingFailed() {
+            if (done) return
+            transaction.discardPartial()
+            end()
+            // The audio was kept; the panel offers retry, copy or discard.
+            pendingFailure = failure
+            manager.activateAction(VoiceInputPanelAction)
+        }
+
+        override fun needPermission(onResult: (Boolean) -> Unit) {
+            context.startActivity(Intent().setClassName(context, "org.futo.inputmethod.latin.MicPermissionActivity")
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            onResult(false)
+            if (!done) {
+                transaction.discardPartial()
+                end()
+            }
+        }
+
+        override fun loading() = Unit
+        override fun decodingStatus(status: InferenceState) = Unit
+        override fun languageDetected(language: Language) = Unit
+    }
 }
 
-private class OpenWisprNotConfiguredWindow(
+private class OpenWisprMessageWindow(
     private val manager: KeyboardManagerForAction,
-    private val message: String = "Set up OpenWispr voice input to start dictating.",
+    private val message: String,
     private val openSettings: Boolean = true,
 ) : ActionWindow() {
     @Composable
@@ -94,202 +242,66 @@ private class OpenWisprNotConfiguredWindow(
     }
 }
 
-private class VoiceInputActionWindow(
-    private val manager: KeyboardManagerForAction,
-    private val state: VoiceInputPersistentState,
-    private val config: OpenWisprConfig,
-) : ActionWindow(), RecognizerViewListener {
-    private val context = manager.getContext()
-    private var shouldPlaySounds = false
-    private var closed = false
-    private val failedSpeech = FailedSpeechStore(context.noBackupFilesDir)
-    private val recovering = mutableStateOf(failedSpeech.exists())
-    private val failure = mutableStateOf<String?>(null)
-
-    // Dictation runs in a strip above the keyboard so the user keeps their place; recovery
-    // needs the full panel for its controls.
-    private val inline = !recovering.value
-    override val onlyShowAboveKeyboard: Boolean get() = inline
-    override val fixedWindowHeight: Dp? get() = if (inline) 64.dp else null
-
-    private fun localPreview(): AudioPreview? {
-        if (Build.VERSION.SDK_INT < 33) return null
-        val language = config.language.trim().ifBlank {
-            manager.getActiveLocales().firstOrNull()?.toLanguageTag() ?: java.util.Locale.getDefault().toLanguageTag()
-        }
-        return OnDeviceSpeechPreview(context, manager.getLifecycleScope(), language, ::partialResult)
-    }
-
-    private fun loadSettings(): RecognizerViewSettings {
-        shouldPlaySounds = context.getSetting(ENABLE_SOUND)
-        return RecognizerViewSettings(
-            shouldShowInlinePartialResult = false,
-            shouldShowVerboseFeedback = false,
-            shouldAnimateBubble = context.getSetting(ANIMATE_BUBBLE),
-            failureMessage = "Transcription failed. Tap to check OpenWispr provider settings.",
-            transcriptionBackend = RecoverableSpeechBackend(OpenWisprTranscriptionBackend(config), failedSpeech) {
-                failure.value = it
-            },
-            livePreview = localPreview(),
-            recordingConfiguration = RecordingSettings(
-                preferBluetoothMic = context.getSetting(PREFER_BLUETOOTH),
-                requestAudioFocus = context.getSetting(AUDIO_FOCUS),
-                canExpandSpace = context.getSetting(CAN_EXPAND_SPACE),
-                silenceTimeoutMs = context.getSetting(VAD_SILENCE_TIMEOUT_MS),
-            ),
-        )
-    }
-
-    private val recognizerView: MutableState<RecognizerView?> = mutableStateOf(null)
-    private val initJob = manager.getLifecycleScope().launch(Dispatchers.Main) {
-        yield()
-        if (closed) return@launch
-        recovering.value = failedSpeech.exists()
-        if (recovering.value) { inputTransaction?.discardPartial(); return@launch }
-        val view = RecognizerView(
-            context = context,
-            listener = this@VoiceInputActionWindow,
-            settings = loadSettings(),
-            lifecycleScope = manager.getLifecycleScope(),
-        )
-        recognizerView.value = view
-        view.reset()
-        view.start()
-    }
-
-    private val inputTransaction = if (recovering.value) null else manager.createInputTransaction()
+private class SpeechRecoveryWindow(private val manager: KeyboardManagerForAction) : ActionWindow() {
+    private val failedSpeech = FailedSpeechStore(manager.getContext().noBackupFilesDir)
+    private val failure = InlineDictation.pendingFailure.also { InlineDictation.pendingFailure = null }
 
     @Composable
     override fun windowName(): String = stringResource(R.string.action_voice_input_title)
 
     @Composable
     override fun WindowContents(keyboardShown: Boolean) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .semantics { traversalIndex = -1.0f },
-        ) {
-            Box(modifier = Modifier.align(Alignment.Center)) {
-                if (recovering.value && inline) {
-                    // The strip is too small for recovery controls; reopen as the full panel.
-                    Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(failure.value ?: "Transcription failed.", Modifier.weight(1f),
-                            maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        TextButton(onClick = {
-                            manager.closeActionWindow()
-                            manager.activateAction(VoiceInputAction)
-                        }) { Text("Recover") }
-                    }
-                } else if (recovering.value) {
-                    SpeechRecoveryControls(
-                        store = failedSpeech,
-                        onResolved = { manager.closeActionWindow() },
-                        onSettings = ::openSettings,
-                        onInsert = if (manager.getCurrentInputEditorInfo() == null) null else { text ->
-                            // Resolve the currently active input only when the user chooses Insert.
-                            val current = manager.createInputTransaction()
-                            current.commit(ModelOutputSanitizer.sanitize(text, current.textContext))
-                        },
-                    )
-                } else if (failure.value != null) {
-                    Text(failure.value!!, Modifier.padding(horizontal = 16.dp),
-                        maxLines = 3, overflow = TextOverflow.Ellipsis)
-                } else {
-                    recognizerView.value?.Content(compact = inline)
-                }
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                failure?.let { Text(it, Modifier.padding(horizontal = 16.dp), textAlign = TextAlign.Center) }
+                SpeechRecoveryControls(
+                    store = failedSpeech,
+                    onResolved = { manager.closeActionWindow() },
+                    onSettings = { SettingsActivity.openToNavDest(manager.getContext(), "openwisprVoice") },
+                    onInsert = if (manager.getCurrentInputEditorInfo() == null) null else { text ->
+                        // Resolve the currently active input only when the user chooses Insert.
+                        val current = manager.createInputTransaction()
+                        current.commit(ModelOutputSanitizer.sanitize(text, current.textContext))
+                    },
+                )
             }
         }
-    }
-
-    // Keys stay visible beside the inline strip but can't type mid-transaction; treat a key as
-    // "done talking" so it is never silently dropped.
-    override fun onKeyPressedDuringInputTransaction() {
-        recognizerView.value?.finish()
-    }
-
-    override fun close(): CloseResult {
-        closed = true
-        inputTransaction?.discardPartial()
-        initJob.cancel()
-        recognizerView.value?.cancel()
-        return CloseResult.Default
-    }
-
-    private var wasFinished = false
-    private var cancelPlayed = false
-
-    override fun cancelled() {
-        if (!wasFinished) {
-            if (shouldPlaySounds && !cancelPlayed) {
-                state.soundPlayer.playCancelSound()
-                cancelPlayed = true
-            }
-            inputTransaction?.discardPartial()
-            recovering.value = failedSpeech.exists()
-        }
-    }
-
-    override fun recordingStarted(device: MicrophoneDeviceState) {
-        if (shouldPlaySounds) state.soundPlayer.playStartSound()
-        if (device.bluetoothAvailable) {
-            manager.getLifecycleScope().launch {
-                context.setSetting(PREFER_BLUETOOTH, device.bluetoothActive)
-            }
-        }
-    }
-
-    override fun finished(result: String) {
-        if (closed || wasFinished) return
-        wasFinished = true
-        manager.getLifecycleScope().launch(Dispatchers.Main) {
-            if (closed) return@launch
-            val transaction = inputTransaction ?: return@launch
-            val sanitized = ModelOutputSanitizer.sanitize(result, transaction.textContext)
-            if (sanitized.isBlank()) transaction.discardPartial() else transaction.commit(sanitized)
-            manager.announce(result)
-            manager.closeActionWindow()
-        }
-    }
-
-    override fun partialResult(result: String) {
-        manager.getLifecycleScope().launch(Dispatchers.Main) {
-            if (closed || wasFinished) return@launch
-            val transaction = inputTransaction ?: return@launch
-            val sanitized = ModelOutputSanitizer.sanitize(result, transaction.textContext)
-            transaction.updatePartial(sanitized)
-        }
-    }
-
-    override fun requestPermission(onGranted: () -> Unit, onRejected: () -> Unit): Boolean = false
-
-    override fun openSettings() {
-        SettingsActivity.openToNavDest(context, "openwisprVoice")
     }
 }
+
+/** Full-height voice panel, only for what can't be shown on the key: setup, lock and recovery. */
+val VoiceInputPanelAction = Action(
+    icon = R.drawable.openwispr_glyph,
+    tintIcon = false,
+    name = R.string.action_voice_input_panel_title,
+    simplePressImpl = null,
+    persistentState = null,
+    shownInEditor = false,
+    windowImpl = { manager, _ ->
+        val context = manager.getContext()
+        when {
+            manager.isDeviceLocked() -> OpenWisprMessageWindow(
+                manager,
+                message = "Voice input is unavailable while device is locked",
+                openSettings = false,
+            )
+            FailedSpeechStore(context.noBackupFilesDir).exists() -> SpeechRecoveryWindow(manager)
+            !OpenWisprConfigStore.load(context).isConfigured ->
+                OpenWisprMessageWindow(manager, "Set up OpenWispr voice input to start dictating.")
+            else -> OpenWisprMessageWindow(
+                manager,
+                InlineDictation.pendingFailure.also { InlineDictation.pendingFailure = null }
+                    ?: "Transcription failed. Check OpenWispr provider settings.",
+            )
+        }
+    },
+)
 
 val VoiceInputAction = Action(
     icon = R.drawable.openwispr_glyph,
     tintIcon = false,
     name = R.string.action_voice_input_title,
-    simplePressImpl = null,
-    keepScreenAwake = true,
-    persistentState = { VoiceInputPersistentState(it) },
-    windowImpl = { manager, persistentState ->
-        val config = OpenWisprConfigStore.load(manager.getContext())
-        when {
-            manager.isDeviceLocked() -> OpenWisprNotConfiguredWindow(
-                manager,
-                message = "Voice input is unavailable while device is locked",
-                openSettings = false,
-            )
-            config.isConfigured || FailedSpeechStore(manager.getContext().noBackupFilesDir).exists() -> {
-            VoiceInputActionWindow(
-                manager = manager,
-                state = persistentState as VoiceInputPersistentState,
-                config = config,
-            )
-            }
-            else -> OpenWisprNotConfiguredWindow(manager)
-        }
-    },
+    simplePressImpl = { manager, _ -> InlineDictation.toggle(manager) },
+    windowImpl = null,
+    iconContent = { modifier -> VoiceKeyIcon(modifier) },
 )

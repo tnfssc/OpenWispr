@@ -9,7 +9,7 @@ collapsing the IME to a floating bubble (no new permissions, but only while Open
 keyboard) or a system overlay plus accessibility. The user chose accessibility.
 
 `FloatingMicService` draws a `TYPE_ACCESSIBILITY_OVERLAY` window (no "display over other apps" grant)
-while an editable, non-password field has input focus and no input-method window is visible. It inserts
+that stays on screen (see floating-mic-persistent.md). It inserts
 with `ACTION_SET_TEXT` + `ACTION_SET_SELECTION`, falling back to clipboard + `ACTION_PASTE` for editors
 that refuse SET_TEXT (web views). Sideloaded installs on Android 13+ need "Allow restricted settings"
 before accessibility can be enabled.

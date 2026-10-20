@@ -10,15 +10,16 @@ import android.graphics.Shader
 import android.graphics.SweepGradient
 import android.os.SystemClock
 import android.view.View
+import org.futo.voiceinput.shared.SpeechWave
 import kotlin.math.PI
-import kotlin.math.exp
+import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.sin
 
 /**
  * The floating mic bubble: a dark disc carrying the OpenWispr bars. Recording turns it warm and
- * drives the bars with the voice; transcribing turns it indigo with a travelling wave and a
+ * drives the bars with the voice alone; transcribing turns it indigo with a travelling wave and a
  * spinning brand-colour ring, so the state reads at a glance without any text.
  */
 internal class FloatingMicBubbleView(context: Context) : View(context) {
@@ -31,6 +32,7 @@ internal class FloatingMicBubbleView(context: Context) : View(context) {
             fromColors = currentColors()
             colorProgress = 0f
             level = 0f
+            speech = SpeechWave()
             postInvalidateOnAnimation()
         }
 
@@ -70,7 +72,8 @@ internal class FloatingMicBubbleView(context: Context) : View(context) {
 
     private var fromColors = colorsFor(State.Idle)
     private var colorProgress = 1f
-    private var shownLevel = 0f
+    /** Recent voice energy; each bar replays it a little later, so speech ripples outward. */
+    private var speech = SpeechWave()
     private var lastFrame = 0L
 
     init {
@@ -94,7 +97,7 @@ internal class FloatingMicBubbleView(context: Context) : View(context) {
         val dt = if (lastFrame == 0L) 0f else min(now - lastFrame, 64L) / 1000f
         lastFrame = now
         colorProgress = min(1f, colorProgress + dt / .25f)
-        shownLevel += (level - shownLevel) * (1f - exp(-dt / .08f))
+        if (state == State.Recording) speech.advance(level, dt)
         val time = now / 1000f
 
         val cx = width / 2f
@@ -105,7 +108,7 @@ internal class FloatingMicBubbleView(context: Context) : View(context) {
 
         if (state == State.Recording) {
             // A soft halo that swells with the voice.
-            val swell = shownLevel.pow(.7f)
+            val swell = speech.levelAt(0f).pow(.7f)
             halo.strokeWidth = (2f + 4f * swell) * density
             halo.color = 0xFFF23C91.toInt()
             halo.alpha = (70 + 110 * swell).toInt()
@@ -134,11 +137,8 @@ internal class FloatingMicBubbleView(context: Context) : View(context) {
             val shape = IdleShape[i]
             val amount = when (state) {
                 State.Idle -> shape
-                State.Recording -> {
-                    val wobble = .6f + .4f * sin(time * 2f * PI.toFloat() * 1.6f + i * 1.3f)
-                    // Breathes a little in silence so a quiet room still reads as listening.
-                    .16f + .1f * shape + .1f * wobble + .7f * min(1f, shownLevel * 1.4f) * (.45f + .55f * shape) * wobble
-                }
+                // Only the voice moves the bars: silence leaves them low and still.
+                State.Recording -> .12f + .88f * min(1f, speech.levelAt(abs(i - 2) * .07f) * 1.3f) * (.55f + .45f * shape)
                 State.Processing -> {
                     val wave = (sin(time * 2f * PI.toFloat() * 1.2f - i * .9f) + 1f) / 2f
                     .25f + .75f * wave.pow(2)

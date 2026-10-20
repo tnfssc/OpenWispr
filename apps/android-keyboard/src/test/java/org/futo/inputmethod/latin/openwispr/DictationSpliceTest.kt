@@ -37,4 +37,18 @@ class DictationSpliceTest {
         assertNull(spliceDictation("ab", 0, 0, "  ", plain))
         assertNull(spliceDictation("ab", 0, 0, "x") { _, _ -> " " })
     }
+
+    @Test
+    fun undoRemovesDictationStillInPlace() {
+        val splice = spliceDictation("ab cd", 3, 3, "x", plain)!!
+        assertEquals("ab cd", removeDictation(splice.newText, splice.cursor - splice.inserted.length, splice.inserted))
+    }
+
+    @Test
+    fun undoRefusesEditedOrMovedDictation() {
+        assertNull(removeDictation("ab helLo cd", 3, "hello"))
+        assertNull(removeDictation("hello", 2, "hello"))
+        assertNull(removeDictation("hello", -1, "hello"))
+        assertNull(removeDictation("hello", 0, ""))
+    }
 }

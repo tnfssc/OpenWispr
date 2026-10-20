@@ -86,6 +86,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.semantics.testTagsAsResourceId
@@ -549,15 +550,18 @@ fun LazyItemScope.ActionItem(idx: Int, action: Action, onSelect: (Action) -> Uni
         .fillMaxHeight()
 
     val contentCol = LocalKeyboardScheme.current.onBackground
+    val actionName = stringResource(action.name)
 
     Box(modifier = modifier
         .clip(CircleShape)
         .combinedClickable(
             onLongClick = action.altPressImpl?.let { { onLongSelect(action) } },
             onClick = { onSelect(action) }), contentAlignment = Center) {
-        Icon(
+        if (action.iconContent != null) {
+            action.iconContent.invoke(Modifier.size(36.dp).semantics { contentDescription = actionName })
+        } else Icon(
             painter = painterResource(id = action.icon),
-            contentDescription = stringResource(action.name),
+            contentDescription = actionName,
             tint = if (action.tintIcon) contentCol else Color.Unspecified,
             modifier = Modifier.size(20.dp),
         )
@@ -569,6 +573,7 @@ fun LazyItemScope.ActionItem(idx: Int, action: Action, onSelect: (Action) -> Uni
 fun ActionItemSmall(action: Action, onSelect: (Action) -> Unit, onLongSelect: (Action) -> Unit) {
     val bgCol = LocalKeyboardScheme.current.keyboardContainer
     val fgCol = LocalKeyboardScheme.current.onKeyboardContainer
+    val actionName = stringResource(action.name)
 
     val circleRadius = with(LocalDensity.current) {
         16.dp.toPx()
@@ -592,9 +597,11 @@ fun ActionItemSmall(action: Action, onSelect: (Action) -> Unit, onLongSelect: (A
         },
         contentAlignment = Center
     ) {
-        Icon(
+        if (action.iconContent != null) {
+            action.iconContent.invoke(Modifier.size(32.dp).semantics { contentDescription = actionName })
+        } else Icon(
             painter = painterResource(id = action.icon),
-            contentDescription = stringResource(action.name),
+            contentDescription = actionName,
             tint = if (action.tintIcon) fgCol else Color.Unspecified,
             modifier = Modifier.size(16.dp)
         )

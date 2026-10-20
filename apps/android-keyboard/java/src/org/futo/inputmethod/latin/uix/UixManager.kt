@@ -125,6 +125,7 @@ import org.futo.inputmethod.latin.uix.actions.ActionRegistry
 import org.futo.inputmethod.latin.uix.actions.AllActions
 import org.futo.inputmethod.latin.uix.actions.BugViewerAction
 import org.futo.inputmethod.latin.uix.actions.BugViewerState
+import org.futo.inputmethod.latin.uix.actions.InlineDictation
 import org.futo.inputmethod.latin.uix.actions.KeyboardModeAction
 import org.futo.inputmethod.latin.uix.actions.PersistentEmojiState
 import org.futo.inputmethod.latin.uix.actions.keyCode
@@ -390,6 +391,13 @@ class UixActionKeyboardManager(val uixManager: UixManager, val latinIME: LatinIM
 
     override fun forceActionWindowAboveKeyboard(to: Boolean) {
         uixManager.toggleExpandAction(to)
+    }
+
+    override fun keepScreenAwake(on: Boolean) {
+        latinIME.window.window?.let {
+            if (on) it.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            else it.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
     }
 
     override fun triggerSystemVoiceInput() {
@@ -1634,6 +1642,7 @@ class UixManager(private val latinIME: LatinIME) {
     }
 
     fun onInputFinishing() {
+        InlineDictation.cancel()
         closeActionWindow()
         languageSwitcherDialog?.dismiss()
         isShowingActionEditor.value = false
@@ -1644,7 +1653,7 @@ class UixManager(private val latinIME: LatinIME) {
 
     // Called by InputLogic on any event
     fun keyPressedDuringInputTransaction() {
-        currWindowActionWindow.value?.onKeyPressedDuringInputTransaction()
+        InlineDictation.onKeyPressed()
     }
 
     fun onInputEvent(textBlank: Boolean) {
