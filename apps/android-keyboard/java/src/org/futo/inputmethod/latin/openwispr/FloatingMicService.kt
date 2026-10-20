@@ -123,6 +123,16 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
     /** Field the recording is for; focus can move away while the provider is transcribing. */
     private var target: AccessibilityNodeInfo? = null
 
+    /**
+     * Latest caret from selection events in the focused field. After SET_TEXT, Chrome's node keeps
+     * answering 0 for the selection (and changes identity) while its events stay accurate, so the
+     * next dictation would land at the start.
+     */
+    private var reportedCaret: Pair<Int, Int>? = null
+
+    private fun caretOf(node: AccessibilityNodeInfo): Pair<Int, Int> =
+        reportedCaret ?: (node.textSelectionStart to node.textSelectionEnd)
+
     /** Where the last dictation went, so the menu can take it back out. */
     private data class Inserted(val node: AccessibilityNodeInfo, val start: Int, val text: String)
     private var lastInserted: Inserted? = null
@@ -154,7 +164,15 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
         refresh()
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) = refresh()
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (event?.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) {
+            reportedCaret = event.fromIndex to event.toIndex
+            return
+        }
+        // Selection events only make sense for the field that had focus when they came.
+        if (event?.eventType == AccessibilityEvent.TYPE_VIEW_FOCUSED) reportedCaret = null
+        refresh()
+    }
 
     override fun onInterrupt() = Unit
 
@@ -487,7 +505,8 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
 
     private fun insert(result: String) {
         if (result.isBlank()) return
-        val node = focusedEditable() ?: target?.takeIf { it.refresh() && it.isEditable }
+        // Cached nodes keep old text: the service does not listen for text changes, so re-read.
+        val node = focusedEditable()?.also { it.refresh() } ?: target?.takeIf { it.refresh() && it.isEditable }
         if (node == null) {
             copyToClipboard(result.trim())
             toast("No text field is focused. Dictation copied to clipboard.")
@@ -496,10 +515,11 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
         // An empty field reports its hint as text. Android 7 has no API to tell the two apart, so
         // there the hint may stay in front of the dictation.
         val showingHint = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && node.isShowingHintText
+        val (selectionStart, selectionEnd) = caretOf(node)
         val splice = spliceDictation(
             current = if (showingHint) "" else node.text?.toString().orEmpty(),
-            selectionStart = node.textSelectionStart,
-            selectionEnd = node.textSelectionEnd,
+            selectionStart = selectionStart,
+            selectionEnd = selectionEnd,
             result = result,
         ) { before, after ->
             runCatching { ModelOutputSanitizer.sanitize(result, TextContext(before, after)) }.getOrElse { result.trim() }
@@ -524,17 +544,16 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
     }
 
     /**
-     * Web editors (contenteditable in Chrome) apply SET_TEXT asynchronously and then put the caret
-     * at the start, overriding a selection set straight away. Re-check shortly after and move the
-     * caret to the end of the dictation if it didn't stick.
+     * Web editors (contenteditable in Chrome) apply SET_TEXT asynchronously and then reset the caret
+     * to the start, overriding a selection set straight away. Re-check shortly after and move it to
+     * the end of the dictation while it is still at the start; a caret the user has moved since is
+     * left alone.
      */
     private fun placeCursor(node: AccessibilityNodeInfo, cursor: Int) {
         select(node, cursor, cursor)
         val anchor = bubble ?: return
         for (delay in CursorRetryDelaysMs) anchor.postDelayed({
-            if (node.refresh() && (node.textSelectionStart != cursor || node.textSelectionEnd != cursor)) {
-                select(node, cursor, cursor)
-            }
+            if (cursor != 0 && caretOf(node) == (0 to 0)) select(node, cursor, cursor)
         }, delay)
     }
 
