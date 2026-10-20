@@ -13,4 +13,7 @@
     <string name="openwispr_system_voice_subtitle" translatable="false">Bypass OpenWispr and launch an external voice-input app</string>
     <string name="openwispr_not_configured" translatable="false">Configure OpenWispr voice input before dictating</string>
     <string name="openwispr_modified_fork_notice" translatable="false">Modified non-commercial FUTO Keyboard fork by OpenWispr. Voice input uses user-configured network providers and is not an official FUTO release.</string>
+    <string name="openwispr_floating_mic_title" translatable="false">OpenWispr floating mic</string>
+    <string name="openwispr_floating_mic_subtitle" translatable="false">Dictate into any text field with the keyboard hidden</string>
+    <string name="openwispr_floating_mic_service_description" translatable="false">Shows a small mic bubble while a text field is focused and the keyboard is hidden. Tap to dictate, tap again to stop, long-press to cancel or hide, drag to move. OpenWispr uses this access only to find the focused text field and insert your dictation; recordings go to your configured speech provider, as with the keyboard mic.</string>
 </resources>

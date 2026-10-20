@@ -64,6 +64,10 @@ class IMEHelper(
         return latinIME.latinIMELegacy.getCoordinatesForCurrentKeyboard(codePoints)
     }
 
+    public fun keyPressedDuringInputTransaction() {
+        latinIME.uixManager.keyPressedDuringInputTransaction()
+    }
+
     public fun triggerAction(actionId: Int, alt: Boolean) {
         latinIME.uixManager.triggerActionInternalFromIme(actionId, alt)
     }

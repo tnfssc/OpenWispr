@@ -13,7 +13,10 @@ import org.futo.inputmethod.latin.uix.CAN_EXPAND_SPACE
 import org.futo.inputmethod.latin.uix.ENABLE_SOUND
 import org.futo.inputmethod.latin.uix.PREFER_BLUETOOTH
 import org.futo.inputmethod.latin.uix.USE_SYSTEM_VOICE_INPUT
-import org.futo.inputmethod.latin.uix.USE_VAD_AUTOSTOP
+import org.futo.inputmethod.latin.uix.VAD_SILENCE_TIMEOUT_MS
+import org.futo.inputmethod.latin.uix.settings.DropDownPickerSettingItem
+import org.futo.inputmethod.latin.uix.settings.UserSetting
+import org.futo.inputmethod.latin.uix.settings.useDataStore
 import org.futo.inputmethod.latin.uix.settings.NavigationItemStyle
 import org.futo.inputmethod.latin.uix.settings.UserSettingsMenu
 import org.futo.inputmethod.latin.uix.settings.useDataStoreValue
@@ -24,6 +27,8 @@ import org.futo.inputmethod.latin.uix.settings.userSettingToggleDataStore
 private val visibilityCheckNotSystemVoiceInput = @Composable {
     useDataStoreValue(USE_SYSTEM_VOICE_INPUT) == false
 }
+
+private val SilenceTimeoutOptionsMs = listOf(0, 1000, 2000, 3000, 5000, 10000, 30000)
 
 val VoiceInputMenu = UserSettingsMenu(
     title = R.string.voice_input_settings_title,
@@ -80,10 +85,26 @@ val VoiceInputMenu = UserSettingsMenu(
             setting = CAN_EXPAND_SPACE
         ).copy(visibilityCheck = visibilityCheckNotSystemVoiceInput),
 
-        userSettingToggleDataStore(
-            title = R.string.voice_input_settings_autostop_vad,
+        UserSetting(
+            name = R.string.voice_input_settings_autostop_vad,
             subtitle = R.string.voice_input_settings_autostop_vad_subtitle,
-            setting = USE_VAD_AUTOSTOP
+            visibilityCheck = visibilityCheckNotSystemVoiceInput,
+        ) {
+            val timeout = useDataStore(VAD_SILENCE_TIMEOUT_MS)
+            DropDownPickerSettingItem(
+                label = stringResource(R.string.voice_input_settings_autostop_vad),
+                options = SilenceTimeoutOptionsMs,
+                selection = timeout.value,
+                onSet = { timeout.setValue(it) },
+                getDisplayName = { if (it == 0) "Never (tap stop)" else "After ${it / 1000} s of silence" },
+            )
+        },
+
+        userSettingNavigationItem(
+            title = R.string.openwispr_floating_mic_title,
+            subtitle = R.string.openwispr_floating_mic_subtitle,
+            style = NavigationItemStyle.Misc,
+            navigateTo = "openwisprFloatingMic",
         ).copy(visibilityCheck = visibilityCheckNotSystemVoiceInput),
 
         userSettingToggleDataStore(

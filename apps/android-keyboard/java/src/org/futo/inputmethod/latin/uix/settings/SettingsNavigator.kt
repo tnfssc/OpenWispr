@@ -48,6 +48,7 @@ import org.futo.inputmethod.latin.uix.settings.pages.MiscMenu
 import org.futo.inputmethod.latin.uix.settings.pages.NumberRowSettingMenu
 import org.futo.inputmethod.latin.uix.settings.pages.OpenWisprRefinementMenu
 import org.futo.inputmethod.latin.uix.settings.pages.OpenWisprSpeechMenu
+import org.futo.inputmethod.latin.uix.settings.pages.OpenWisprFloatingMicMenu
 import org.futo.inputmethod.latin.uix.settings.pages.PaymentScreen
 import org.futo.inputmethod.latin.uix.settings.pages.PaymentThankYouScreen
 import org.futo.inputmethod.latin.uix.settings.pages.PredictiveTextMenu
@@ -109,6 +110,7 @@ val SettingsMenus = listOf(
     VoiceInputMenu,
     OpenWisprSpeechMenu,
     OpenWisprRefinementMenu,
+    OpenWisprFloatingMicMenu,
     ActionsScreen,
     HelpMenu,
     MiscMenu,

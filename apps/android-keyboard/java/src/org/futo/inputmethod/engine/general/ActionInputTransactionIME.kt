@@ -53,7 +53,8 @@ class ActionInputTransactionIME(val helper: IMEHelper) : IMEInterface, ActionInp
     }
 
     override fun isGestureHandlingAvailable(): Boolean = false
-    override fun onEvent(event: Event) {}
+    // Keys can be on screen while an action window owns the input (inline dictation).
+    override fun onEvent(event: Event) { helper.keyPressedDuringInputTransaction() }
     override fun onStartBatchInput() {}
     override fun onUpdateBatchInput(batchPointers: InputPointers?) {}
     override fun onEndBatchInput(batchPointers: InputPointers?) {}

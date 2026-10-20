@@ -44,9 +44,10 @@ val AUDIO_FOCUS = SettingsKey(
     default = true
 )
 
-val USE_VAD_AUTOSTOP = SettingsKey(
-    key = booleanPreferencesKey("use_vad_autostop"),
-    default = true
+/** Silence before recording stops on its own; 0 keeps recording until the user taps stop. */
+val VAD_SILENCE_TIMEOUT_MS = SettingsKey(
+    key = intPreferencesKey("vad_silence_timeout_ms"),
+    default = 5000
 )
 
 val ENGLISH_MODEL_INDEX = SettingsKey(

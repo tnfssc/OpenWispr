@@ -16,7 +16,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.util.Log
-import androidx.lifecycle.LifecycleCoroutineScope
+import kotlinx.coroutines.CoroutineScope
 import com.konovalov.vad.Vad
 import com.konovalov.vad.config.FrameSize
 import com.konovalov.vad.config.Mode
@@ -68,7 +68,8 @@ data class RecordingSettings(
     val preferBluetoothMic: Boolean,
     val requestAudioFocus: Boolean,
     val canExpandSpace: Boolean,
-    val useVADAutoStop: Boolean
+    /** Stop after this much silence once speech was heard; 0 disables auto-stop. */
+    val silenceTimeoutMs: Int,
 )
 
 data class AudioRecognizerSettings(
@@ -79,7 +80,7 @@ data class AudioRecognizerSettings(
 
 class AudioRecognizer(
     private val context: Context,
-    private val lifecycleScope: LifecycleCoroutineScope,
+    private val lifecycleScope: CoroutineScope,
     private val listener: AudioRecognizerListener,
     private val settings: AudioRecognizerSettings
 ) {
@@ -87,7 +88,9 @@ class AudioRecognizer(
     private var recorder: AudioRecord? = null
 
     private val canExpandSpace = settings.recordingConfiguration.canExpandSpace
-    private val useVAD = settings.recordingConfiguration.useVADAutoStop
+    private val useVAD = settings.recordingConfiguration.silenceTimeoutMs > 0
+    // Each VAD frame is 480 samples, 30 ms at 16 kHz.
+    private val silenceFramesBeforeStop = settings.recordingConfiguration.silenceTimeoutMs / 30
 
     private var pcmSamples: ShortBuffer = ShortBuffer.allocate(SAMPLE_RATE_HZ * 30)
     private var recorderJob: Job? = null
@@ -293,7 +296,7 @@ class AudioRecognizer(
             val isRunningOutOfSpace =
                 (pcmSamples.remaining() < samples.size) && !expandSpaceIfAllowed()
 
-            val hasNotTalkedRecently = hasTalked && (numConsecutiveNonSpeech > 66) && useVAD
+            val hasNotTalkedRecently = hasTalked && (numConsecutiveNonSpeech > silenceFramesBeforeStop) && useVAD
             if (isRunningOutOfSpace || hasNotTalkedRecently) {
                 yield()
                 withContext(Dispatchers.Main) {

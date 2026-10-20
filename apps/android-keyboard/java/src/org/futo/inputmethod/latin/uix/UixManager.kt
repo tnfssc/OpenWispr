@@ -1643,6 +1643,10 @@ class UixManager(private val latinIME: LatinIME) {
     }
 
     // Called by InputLogic on any event
+    fun keyPressedDuringInputTransaction() {
+        currWindowActionWindow.value?.onKeyPressedDuringInputTransaction()
+    }
+
     fun onInputEvent(textBlank: Boolean) {
         inlineStuffHiddenByTyping.value = textBlank == false
     }

@@ -14,6 +14,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import org.futo.inputmethod.latin.openwispr.FloatingMicService
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -312,5 +318,50 @@ private fun SecretField(
 private fun SaveButton(saved: Boolean, enabled: Boolean, onSave: () -> Unit) {
     Button(onClick = onSave, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
         Text(if (saved) "Saved" else "Save")
+    }
+}
+
+val OpenWisprFloatingMicMenu = UserSettingsMenu(
+    title = R.string.openwispr_floating_mic_title,
+    navPath = "openwisprFloatingMic",
+    registerNavPath = true,
+    settings = listOf(userSettingDecorationOnly { OpenWisprFloatingMicSettings() }),
+)
+
+@Composable
+private fun OpenWisprFloatingMicSettings() {
+    val context = LocalContext.current
+    var enabled by remember { mutableStateOf(FloatingMicService.isEnabled(context)) }
+    val owner = LocalLifecycleOwner.current
+    DisposableEffect(owner) {
+        // Re-check after returning from Android's accessibility settings.
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) enabled = FloatingMicService.isEnabled(context)
+        }
+        owner.lifecycle.addObserver(observer)
+        onDispose { owner.lifecycle.removeObserver(observer) }
+    }
+
+    SettingsForm {
+        Text("A small mic bubble appears while a text field is focused and the keyboard is hidden, so you keep the whole screen and can still dictate.")
+        Text("Tap the bubble to start, tap again to stop. Long-press cancels a recording, or hides the bubble for the current field. Drag it anywhere.")
+        Text("Android requires accessibility access for this. OpenWispr uses it only to find the focused text field and insert your dictation. Recordings go to your speech provider, same as the keyboard mic.")
+        Text(
+            if (enabled) "Floating mic is on." else "Floating mic is off.",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Button(onClick = {
+            context.startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }) {
+            Text(if (enabled) "Turn off in accessibility settings" else "Turn on in accessibility settings")
+        }
+        if (!enabled) {
+            Text("If Android says the setting is restricted, open OpenWispr's app info, tap ⋮ and choose “Allow restricted settings”, then try again.")
+            TextButton(onClick = {
+                context.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:" + context.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }) { Text("Open app info") }
+        }
     }
 }

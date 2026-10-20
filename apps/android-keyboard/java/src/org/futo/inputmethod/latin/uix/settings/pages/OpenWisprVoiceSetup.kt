@@ -146,7 +146,7 @@ fun VoiceSetupTest(progress: VoiceSetupProgress, update: (VoiceSetupProgress) ->
             view = RecognizerView(context, listener,
                 RecognizerViewSettings(false, false, true, "Check voice settings and try again.",
                     RecoverableSpeechBackend(OpenWisprTranscriptionBackend(config), store) { failure = it },
-                    RecordingSettings(false, true, true, false)), lifecycle)
+                    RecordingSettings(false, true, true, silenceTimeoutMs = 0)), lifecycle)
             recording = true
             view?.reset()
             view?.start()
