@@ -179,15 +179,32 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
         super.onDestroy()
     }
 
-    private fun focusedEditable(): AccessibilityNodeInfo? =
-        findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.takeIf { it.isEditable && !it.isPassword }
+    private fun focusedEditable(): AccessibilityNodeInfo? = focusedField()?.takeUnless { it.isPassword }
+
+    /**
+     * The editable field with input focus. Chrome reports its whole web view as the input focus
+     * until its accessibility tree has been read, so look inside a non-editable focus for the field.
+     */
+    private fun focusedField(): AccessibilityNodeInfo? {
+        val focus = findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return null
+        return if (focus.isEditable) focus else findFocusedEditable(focus, 0)
+    }
+
+    private fun findFocusedEditable(node: AccessibilityNodeInfo, depth: Int): AccessibilityNodeInfo? {
+        if (node.isEditable && node.isFocused) return node
+        if (depth >= MaxFocusSearchDepth) return null
+        for (i in 0 until node.childCount) {
+            node.getChild(i)?.let { child -> findFocusedEditable(child, depth + 1)?.let { return it } }
+        }
+        return null
+    }
 
     private fun refresh() {
         // The hidden state must not depend on focus: dropping it whenever no field is focused let
         // the keyboard flash up for a moment on every tap into a field. Passwords never go through
         // the bubble, so the keyboard comes back for them; anywhere else the always-present bubble
         // offers "Show keyboard".
-        val passwordFocused = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.isPassword == true
+        val passwordFocused = focusedField()?.isPassword == true
         setKeyboardHidden(bubbleEnabled && hideKeyboard && !passwordFocused)
         // The bubble stays put whatever has focus, so it is always where the user left it.
         if (bubbleEnabled) showBubble() else removeBubble()
@@ -198,7 +215,7 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
         if (softKeyboardController.showMode == mode) return
         softKeyboardController.setShowMode(mode)
         // The app focused meanwhile thinks the keyboard is already up and ignores taps on the field.
-        if (!hidden && findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.isEditable == true) KeyboardBridge.requestShow()
+        if (!hidden && focusedField() != null) KeyboardBridge.requestShow()
     }
 
     private fun dp(value: Number): Int = (value.toFloat() * resources.displayMetrics.density).roundToInt()
@@ -493,7 +510,7 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, newText)
         })
         if (replaced) {
-            select(node, cursor, cursor)
+            placeCursor(node, cursor)
             lastInserted = Inserted(node, cursor - text.length, text)
             return
         }
@@ -504,6 +521,21 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
         } else {
             toast("This field does not accept dictation. Text copied to clipboard.")
         }
+    }
+
+    /**
+     * Web editors (contenteditable in Chrome) apply SET_TEXT asynchronously and then put the caret
+     * at the start, overriding a selection set straight away. Re-check shortly after and move the
+     * caret to the end of the dictation if it didn't stick.
+     */
+    private fun placeCursor(node: AccessibilityNodeInfo, cursor: Int) {
+        select(node, cursor, cursor)
+        val anchor = bubble ?: return
+        for (delay in CursorRetryDelaysMs) anchor.postDelayed({
+            if (node.refresh() && (node.textSelectionStart != cursor || node.textSelectionEnd != cursor)) {
+                select(node, cursor, cursor)
+            }
+        }, delay)
     }
 
     private fun select(node: AccessibilityNodeInfo, start: Int, end: Int) =
@@ -526,7 +558,7 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, restored)
         })
         if (replaced) {
-            select(node, last.start, last.start)
+            placeCursor(node, last.start)
             return
         }
         // Editors that took the dictation as a paste: select it and cut it back out.
@@ -751,6 +783,8 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
         private const val EdgeGapDp = 8
         private const val Stiffness = 420f
         private const val DampingRatio = .55f
+        private const val MaxFocusSearchDepth = 60
+        private val CursorRetryDelaysMs = longArrayOf(120, 400, 900)
 
         fun isEnabled(context: Context): Boolean {
             val component = ComponentName(context, FloatingMicService::class.java)
