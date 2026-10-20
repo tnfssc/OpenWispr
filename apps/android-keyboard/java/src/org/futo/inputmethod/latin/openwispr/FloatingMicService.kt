@@ -28,7 +28,6 @@ import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
-import android.view.accessibility.AccessibilityWindowInfo
 import android.view.animation.OvershootInterpolator
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -91,6 +90,14 @@ fun spliceDictation(
     return DictationSplice(before + text + after, start + text.length, text)
 }
 
+/** The field's text with a dictation taken back out, or null if it is no longer where it was put. */
+fun removeDictation(current: String, start: Int, inserted: String): String? {
+    val end = start + inserted.length
+    if (inserted.isEmpty() || start < 0 || end > current.length) return null
+    if (current.substring(start, end) != inserted) return null
+    return current.removeRange(start, end)
+}
+
 /**
  * Floating mic bubble for dictating into whatever text field has focus, with the keyboard hidden.
  *
@@ -115,11 +122,13 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
 
     /** Field the recording is for; focus can move away while the provider is transcribing. */
     private var target: AccessibilityNodeInfo? = null
-    /** Field the user hid the bubble for; it stays hidden until focus moves elsewhere. */
-    private var dismissedFor: AccessibilityNodeInfo? = null
+
+    /** Where the last dictation went, so the menu can take it back out. */
+    private data class Inserted(val node: AccessibilityNodeInfo, val start: Int, val text: String)
+    private var lastInserted: Inserted? = null
 
     private var bubbleEnabled = true
-    /** The user asked to type by voice only; the keyboard stays hidden wherever the bubble shows. */
+    /** The user asked to type by voice only; the keyboard stays hidden everywhere but password fields. */
     private var hideKeyboard = false
 
     private val preferences by lazy { getSharedPreferences("openwispr_floating_mic", Context.MODE_PRIVATE) }
@@ -170,27 +179,43 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
         super.onDestroy()
     }
 
-    private fun focusedEditable(): AccessibilityNodeInfo? =
-        findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.takeIf { it.isEditable && !it.isPassword }
+    private fun focusedEditable(): AccessibilityNodeInfo? = focusedField()?.takeUnless { it.isPassword }
 
-    private fun keyboardVisible(): Boolean =
-        windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+    /**
+     * The editable field with input focus. Chrome reports its whole web view as the input focus
+     * until its accessibility tree has been read, so look inside a non-editable focus for the field.
+     */
+    private fun focusedField(): AccessibilityNodeInfo? {
+        val focus = findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return null
+        return if (focus.isEditable) focus else findFocusedEditable(focus, 0)
+    }
+
+    private fun findFocusedEditable(node: AccessibilityNodeInfo, depth: Int): AccessibilityNodeInfo? {
+        if (node.isEditable && node.isFocused) return node
+        if (depth >= MaxFocusSearchDepth) return null
+        for (i in 0 until node.childCount) {
+            node.getChild(i)?.let { child -> findFocusedEditable(child, depth + 1)?.let { return it } }
+        }
+        return null
+    }
 
     private fun refresh() {
-        if (mode != Mode.Idle) return
-        val field = focusedEditable()
-        if (field != dismissedFor) dismissedFor = null
-        val eligible = bubbleEnabled && field != null && dismissedFor == null
-        // The keyboard only stays hidden where the bubble can stand in for it: password fields,
-        // fields the bubble was hidden for and screens without a recognisable field get it back.
-        setKeyboardHidden(eligible && hideKeyboard)
-        // Otherwise the keyboard has its own mic; the bubble is for when the keyboard is out of the way.
-        if (eligible && (hideKeyboard || !keyboardVisible())) showBubble() else removeBubble()
+        // The hidden state must not depend on focus: dropping it whenever no field is focused let
+        // the keyboard flash up for a moment on every tap into a field. Passwords never go through
+        // the bubble, so the keyboard comes back for them; anywhere else the always-present bubble
+        // offers "Show keyboard".
+        val passwordFocused = focusedField()?.isPassword == true
+        setKeyboardHidden(bubbleEnabled && hideKeyboard && !passwordFocused)
+        // The bubble stays put whatever has focus, so it is always where the user left it.
+        if (bubbleEnabled) showBubble() else removeBubble()
     }
 
     private fun setKeyboardHidden(hidden: Boolean) {
         val mode = if (hidden) SHOW_MODE_HIDDEN else SHOW_MODE_AUTO
-        if (softKeyboardController.showMode != mode) softKeyboardController.setShowMode(mode)
+        if (softKeyboardController.showMode == mode) return
+        softKeyboardController.setShowMode(mode)
+        // The app focused meanwhile thinks the keyboard is already up and ignores taps on the field.
+        if (!hidden && focusedField() != null) KeyboardBridge.requestShow()
     }
 
     private fun dp(value: Number): Int = (value.toFloat() * resources.displayMetrics.density).roundToInt()
@@ -313,13 +338,10 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
                 action()
             }
         })
+        if (lastInserted != null) item(R.string.floating_mic_undo) { undoLastDictation() }
         item(if (hideKeyboard) R.string.floating_mic_show_keyboard else R.string.floating_mic_hide_keyboard) {
             hideKeyboard = !hideKeyboard
             preferences.edit().putBoolean(KeyHideKeyboard, hideKeyboard).apply()
-            refresh()
-        }
-        item(R.string.floating_mic_hide_here) {
-            dismissedFor = focusedEditable()
             refresh()
         }
         item(R.string.floating_mic_turn_off) {
@@ -377,6 +399,7 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
             }
         }
         target = focusedEditable()
+        lastInserted = null
         finished = false
         failure = null
         val recognizer = AudioRecognizer(
@@ -487,16 +510,60 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, newText)
         })
         if (replaced) {
-            node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, Bundle().apply {
-                putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, cursor)
-                putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, cursor)
-            })
+            placeCursor(node, cursor)
+            lastInserted = Inserted(node, cursor - text.length, text)
             return
         }
         // Web views and some custom editors refuse SET_TEXT but accept a paste at the cursor.
         copyToClipboard(text)
-        if (!node.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
+        if (node.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
+            lastInserted = Inserted(node, cursor - text.length, text)
+        } else {
             toast("This field does not accept dictation. Text copied to clipboard.")
+        }
+    }
+
+    /**
+     * Web editors (contenteditable in Chrome) apply SET_TEXT asynchronously and then put the caret
+     * at the start, overriding a selection set straight away. Re-check shortly after and move the
+     * caret to the end of the dictation if it didn't stick.
+     */
+    private fun placeCursor(node: AccessibilityNodeInfo, cursor: Int) {
+        select(node, cursor, cursor)
+        val anchor = bubble ?: return
+        for (delay in CursorRetryDelaysMs) anchor.postDelayed({
+            if (node.refresh() && (node.textSelectionStart != cursor || node.textSelectionEnd != cursor)) {
+                select(node, cursor, cursor)
+            }
+        }, delay)
+    }
+
+    private fun select(node: AccessibilityNodeInfo, start: Int, end: Int) =
+        node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, Bundle().apply {
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, start)
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, end)
+        })
+
+    /** Removes the last dictation, but only if it is still exactly where it was put. */
+    private fun undoLastDictation() {
+        val last = lastInserted ?: return
+        lastInserted = null
+        val node = last.node.takeIf { it.refresh() }
+        val restored = node?.text?.toString()?.let { removeDictation(it, last.start, last.text) }
+        if (node == null || restored == null) {
+            toast("The dictated text was edited or moved, so it can't be undone.")
+            return
+        }
+        val replaced = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, restored)
+        })
+        if (replaced) {
+            placeCursor(node, last.start)
+            return
+        }
+        // Editors that took the dictation as a paste: select it and cut it back out.
+        if (!select(node, last.start, last.start + last.text.length) || !node.performAction(AccessibilityNodeInfo.ACTION_CUT)) {
+            toast("This field does not allow undoing the dictation.")
         }
     }
 
@@ -716,6 +783,8 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
         private const val EdgeGapDp = 8
         private const val Stiffness = 420f
         private const val DampingRatio = .55f
+        private const val MaxFocusSearchDepth = 60
+        private val CursorRetryDelaysMs = longArrayOf(120, 400, 900)
 
         fun isEnabled(context: Context): Boolean {
             val component = ComponentName(context, FloatingMicService::class.java)

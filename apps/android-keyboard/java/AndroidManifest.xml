@@ -41,7 +41,7 @@
 
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove"/>
 
-    <application android:label="@string/openwispr_ime_name"
+    <application android:label="@string/openwispr_app_name"
          android:icon="@mipmap/ic_launcher"
          android:roundIcon="@mipmap/ic_launcher_round"
          android:supportsRtl="true"
@@ -89,6 +89,7 @@
 
         <!-- Activities -->
         <activity android:name=".uix.settings.SettingsActivity"
+             android:label="@string/openwispr_app_name"
              android:theme="@style/Theme.AppCompat.DayNight.NoActionBar"
              android:icon="@mipmap/ic_launcher"
              android:roundIcon="@mipmap/ic_launcher_round"

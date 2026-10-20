@@ -44,6 +44,7 @@ val AllActionsMap = mapOf(
     "right" to ArrowRightAction,
     "font_typer" to FontTyperAction,
     "floating_mic" to FloatingMicAction,
+    "voice_input_panel" to VoiceInputPanelAction,
 )
 
 val ActionToId = AllActionsMap.entries.associate { it.value to it.key }

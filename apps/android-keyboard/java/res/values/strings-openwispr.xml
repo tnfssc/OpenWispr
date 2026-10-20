@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- App drawer and app info; the input method keeps "Keyboard" so it reads clearly in the keyboard picker. -->
+    <string name="openwispr_app_name" translatable="false">OpenWispr</string>
     <string name="openwispr_ime_name" translatable="false">OpenWispr Keyboard</string>
     <string name="openwispr_settings_title" translatable="false">OpenWispr Keyboard Settings</string>
     <string name="openwispr_spell_checker_title" translatable="false">OpenWispr Spell Checker Settings</string>
@@ -14,14 +16,15 @@
     <string name="openwispr_not_configured" translatable="false">Configure OpenWispr voice input before dictating</string>
     <string name="openwispr_modified_fork_notice" translatable="false">Modified non-commercial FUTO Keyboard fork by OpenWispr. Voice input uses user-configured network providers and is not an official FUTO release.</string>
     <string name="openwispr_floating_mic_title" translatable="false">OpenWispr floating mic</string>
-    <string name="openwispr_floating_mic_subtitle" translatable="false">Dictate into any text field with the keyboard hidden</string>
-    <string name="openwispr_floating_mic_service_description" translatable="false">Shows a small mic bubble while a text field is focused and the keyboard is hidden. Tap to dictate, tap again to stop, long-press for options such as hiding the keyboard, drag to move. OpenWispr uses this access only to find the focused text field and insert your dictation; recordings go to your configured speech provider, as with the keyboard mic.</string>
+    <string name="openwispr_floating_mic_subtitle" translatable="false">Dictate into any text field from a floating bubble</string>
+    <string name="openwispr_floating_mic_service_description" translatable="false">Keeps a small mic bubble on screen. Tap to dictate, tap again to stop, long-press for options such as hiding the keyboard, drag to move. OpenWispr uses this access only to find the focused text field and insert your dictation; recordings go to your configured speech provider, as with the keyboard mic.</string>
+    <string name="action_voice_input_panel_title" translatable="false">Voice input panel</string>
     <string name="action_floating_mic_title" translatable="false">Floating mic</string>
-    <string name="floating_mic_turned_on" translatable="false">Floating mic on. It shows when the keyboard is hidden.</string>
+    <string name="floating_mic_turned_on" translatable="false">Floating mic on</string>
     <string name="floating_mic_turned_off" translatable="false">Floating mic off. Turn it back on from the keyboard toolbar.</string>
+    <string name="floating_mic_undo" translatable="false">Undo last dictation</string>
     <string name="floating_mic_hide_keyboard" translatable="false">Hide keyboard</string>
     <string name="floating_mic_show_keyboard" translatable="false">Show keyboard</string>
-    <string name="floating_mic_hide_here" translatable="false">Hide bubble for this field</string>
     <string name="floating_mic_turn_off" translatable="false">Turn off floating mic</string>
     <string name="floating_mic_settings" translatable="false">Voice settings</string>
 </resources>

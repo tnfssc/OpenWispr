@@ -8,8 +8,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -24,7 +22,6 @@ import org.futo.voiceinput.shared.types.InferenceState
 import org.futo.voiceinput.shared.types.Language
 import org.futo.voiceinput.shared.types.MagnitudeState
 import org.futo.voiceinput.shared.ui.InnerRecognize
-import org.futo.voiceinput.shared.ui.InnerRecognizeCompact
 import org.futo.voiceinput.shared.ui.MicrophoneDeviceState
 import org.futo.voiceinput.shared.ui.RecognizeMicError
 
@@ -99,17 +96,9 @@ class RecognizerView(
     ))
 
     @Composable
-    fun Content(compact: Boolean = false) {
+    fun Content() {
         when (currentViewState.value) {
-            CurrentView.LoadingCircle, CurrentView.PartialDecodingResult, CurrentView.InnerRecognize -> if (compact) {
-                InnerRecognizeCompact(
-                    magnitude = magnitudeState,
-                    state = statusState,
-                    processing = processingState.value,
-                    animated = settings.shouldAnimateBubble,
-                    onFinish = ::finish,
-                )
-            } else {
+            CurrentView.LoadingCircle, CurrentView.PartialDecodingResult, CurrentView.InnerRecognize -> {
                 InnerRecognize(
                     magnitude = magnitudeState,
                     state = statusState,
@@ -120,11 +109,7 @@ class RecognizerView(
                 )
             }
 
-            CurrentView.PermissionError -> if (compact) {
-                TextButton(onClick = { recognizer.openPermissionSettings() }, Modifier.fillMaxSize()) {
-                    Text(stringResource(R.string.grant_microphone_permission_to_use_voice_input), maxLines = 2)
-                }
-            } else {
+            CurrentView.PermissionError -> {
                 Column {
                     RecognizeMicError(openSettings = { recognizer.openPermissionSettings() })
                 }
