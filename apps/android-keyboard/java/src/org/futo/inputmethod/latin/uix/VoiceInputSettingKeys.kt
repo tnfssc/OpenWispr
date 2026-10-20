@@ -50,6 +50,15 @@ val VAD_SILENCE_TIMEOUT_MS = SettingsKey(
     default = 5000
 )
 
+/**
+ * Whether the floating mic bubble shows. Separate from the accessibility service being enabled,
+ * which only Android settings can change, so the keyboard toolbar can switch the bubble quickly.
+ */
+val FLOATING_MIC_BUBBLE = SettingsKey(
+    key = booleanPreferencesKey("floating_mic_bubble"),
+    default = true
+)
+
 val ENGLISH_MODEL_INDEX = SettingsKey(
     key = intPreferencesKey("english_model_index"),
     default = 0

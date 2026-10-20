@@ -7,35 +7,45 @@ import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.graphics.Canvas
-import android.graphics.Paint
+import android.content.res.ColorStateList
+import android.content.res.Configuration
 import android.graphics.PixelFormat
-import android.graphics.RectF
+import android.graphics.Rect
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.provider.Settings
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
+import android.view.VelocityTracker
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
-import android.graphics.drawable.GradientDrawable
+import android.view.animation.OvershootInterpolator
+import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.appcompat.content.res.AppCompatResources
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import org.futo.inputmethod.latin.R
 import org.futo.inputmethod.latin.RichInputMethodManager
 import org.futo.inputmethod.latin.uix.AUDIO_FOCUS
 import org.futo.inputmethod.latin.uix.CAN_EXPAND_SPACE
 import org.futo.inputmethod.latin.uix.ENABLE_SOUND
+import org.futo.inputmethod.latin.uix.FLOATING_MIC_BUBBLE
 import org.futo.inputmethod.latin.uix.PREFER_BLUETOOTH
 import org.futo.inputmethod.latin.uix.VAD_SILENCE_TIMEOUT_MS
 import org.futo.inputmethod.latin.uix.getSetting
+import org.futo.inputmethod.latin.uix.getSettingFlow
+import org.futo.inputmethod.latin.uix.setSetting
 import org.futo.inputmethod.latin.uix.settings.SettingsActivity
 import org.futo.inputmethod.latin.uix.utils.ModelOutputSanitizer
 import org.futo.inputmethod.latin.uix.utils.TextContext
@@ -51,6 +61,8 @@ import org.futo.voiceinput.shared.ui.MicrophoneDeviceState
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 data class DictationSplice(val newText: String, val cursor: Int, val inserted: String)
 
@@ -83,15 +95,17 @@ fun spliceDictation(
  * Floating mic bubble for dictating into whatever text field has focus, with the keyboard hidden.
  *
  * Accessibility is what lets it see the focused field in other apps and write into it; its overlay
- * window type needs no separate "display over other apps" grant.
+ * window type needs no separate "display over other apps" grant. It can also keep the soft keyboard
+ * from showing, for voice-only typing.
  */
 class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
     private enum class Mode { Idle, Recording, Processing }
 
     private val scope = MainScope()
     private var windowManager: WindowManager? = null
-    private var bubble: BubbleView? = null
+    private var bubble: FloatingMicBubbleView? = null
     private var params: WindowManager.LayoutParams? = null
+    private var spring: Spring? = null
     private var soundPlayer: SoundPlayer? = null
 
     private var mode = Mode.Idle
@@ -101,8 +115,12 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
 
     /** Field the recording is for; focus can move away while the provider is transcribing. */
     private var target: AccessibilityNodeInfo? = null
-    /** Field the user dismissed the bubble for; it stays hidden until focus moves elsewhere. */
+    /** Field the user hid the bubble for; it stays hidden until focus moves elsewhere. */
     private var dismissedFor: AccessibilityNodeInfo? = null
+
+    private var bubbleEnabled = true
+    /** The user asked to type by voice only; the keyboard stays hidden wherever the bubble shows. */
+    private var hideKeyboard = false
 
     private val preferences by lazy { getSharedPreferences("openwispr_floating_mic", Context.MODE_PRIVATE) }
 
@@ -112,6 +130,18 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
         soundPlayer = SoundPlayer(this)
         // ModelOutputSanitizer reads the keyboard locale; the keyboard may not have started yet.
         RichInputMethodManager.init(applicationContext)
+        hideKeyboard = preferences.getBoolean(KeyHideKeyboard, false)
+        bubbleEnabled = getSetting(FLOATING_MIC_BUBBLE)
+        scope.launch {
+            getSettingFlow(FLOATING_MIC_BUBBLE).collect { enabled ->
+                // The keyboard's toggle cannot show a toast of its own (see toast()), so confirm here.
+                if (enabled != bubbleEnabled) toast(getString(
+                    if (enabled) R.string.floating_mic_turned_on else R.string.floating_mic_turned_off))
+                bubbleEnabled = enabled
+                if (!enabled) recognizer?.cancel()
+                refresh()
+            }
+        }
         refresh()
     }
 
@@ -119,9 +149,20 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
 
     override fun onInterrupt() = Unit
 
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // Rotation changes the screen edges the bubble is docked to.
+        val layout = params ?: return
+        removeMenu()
+        spring?.stop()
+        dock(layout)
+        bubble?.let { runCatching { windowManager?.updateViewLayout(it, layout) } }
+    }
+
     override fun onDestroy() {
         // reset, not cancel: the cancel callback would touch windows of a dead service.
         recognizer?.reset()
+        runCatching { setKeyboardHidden(false) }
         removeBubble()
         removeMessage()
         soundPlayer?.close()
@@ -139,17 +180,61 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
         if (mode != Mode.Idle) return
         val field = focusedEditable()
         if (field != dismissedFor) dismissedFor = null
-        // The keyboard has its own mic; the bubble is for when the keyboard is out of the way.
-        if (field != null && dismissedFor == null && !keyboardVisible()) showBubble() else removeBubble()
+        val eligible = bubbleEnabled && field != null && dismissedFor == null
+        // The keyboard only stays hidden where the bubble can stand in for it: password fields,
+        // fields the bubble was hidden for and screens without a recognisable field get it back.
+        setKeyboardHidden(eligible && hideKeyboard)
+        // Otherwise the keyboard has its own mic; the bubble is for when the keyboard is out of the way.
+        if (eligible && (hideKeyboard || !keyboardVisible())) showBubble() else removeBubble()
     }
 
-    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+    private fun setKeyboardHidden(hidden: Boolean) {
+        val mode = if (hidden) SHOW_MODE_HIDDEN else SHOW_MODE_AUTO
+        if (softKeyboardController.showMode != mode) softKeyboardController.setShowMode(mode)
+    }
+
+    private fun dp(value: Number): Int = (value.toFloat() * resources.displayMetrics.density).roundToInt()
+
+    /** Screen area clear of the status and navigation bars, in overlay window coordinates. */
+    private fun usableArea(): Rect {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            windowManager?.let { manager ->
+                val metrics = manager.currentWindowMetrics
+                val insets = metrics.windowInsets.getInsetsIgnoringVisibility(
+                    WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+                return Rect(insets.left, insets.top,
+                    metrics.bounds.width() - insets.right, metrics.bounds.height() - insets.bottom)
+            }
+        }
+        val metrics = resources.displayMetrics
+        return Rect(0, dp(24), metrics.widthPixels, metrics.heightPixels - dp(48))
+    }
+
+    /** The bubble window's transparent margin minus the gap kept between the disc and the edge. */
+    private fun edgeOverhang(): Int =
+        (dp(FloatingMicBubbleView.SizeDp) - dp(FloatingMicBubbleView.RadiusDp * 2)) / 2 - dp(EdgeGapDp)
+
+    private fun dockedX(right: Boolean, size: Int): Int {
+        val area = usableArea()
+        return if (right) area.right - size + edgeOverhang() else area.left - edgeOverhang()
+    }
+
+    private fun clampY(y: Int, size: Int): Int {
+        val area = usableArea()
+        return y.coerceIn(area.top - edgeOverhang(), max(area.top, area.bottom - size + edgeOverhang()))
+    }
+
+    /** Snap to the saved side, e.g. after rotation or when the bubble reappears. */
+    private fun dock(layout: WindowManager.LayoutParams) {
+        layout.x = dockedX(preferences.getBoolean(KeyRight, true), layout.width)
+        layout.y = clampY(preferences.getInt(KeyY, usableArea().centerY()), layout.height)
+    }
 
     @SuppressLint("ClickableViewAccessibility")
     private fun showBubble() {
         if (bubble != null) return
         val manager = windowManager ?: return
-        val size = dp(BubbleSizeDp)
+        val size = dp(FloatingMicBubbleView.SizeDp)
         val layout = WindowManager.LayoutParams(
             size, size,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
@@ -157,27 +242,26 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            val metrics = resources.displayMetrics
-            x = preferences.getInt("x", metrics.widthPixels - size - dp(8))
-            y = preferences.getInt("y", metrics.heightPixels / 2)
-            clampToScreen(this)
+            dock(this)
         }
-        val view = BubbleView(this)
+        val view = FloatingMicBubbleView(this)
         view.contentDescription = getString(R.string.openwispr_floating_mic_title)
         view.setOnTouchListener(DragOrTap(view, layout))
         manager.addView(view, layout)
         bubble = view
         params = layout
-    }
-
-    /** Saved positions can fall off-screen after rotation or a display-size change. */
-    private fun clampToScreen(layout: WindowManager.LayoutParams) {
-        val metrics = resources.displayMetrics
-        layout.x = layout.x.coerceIn(0, max(0, metrics.widthPixels - layout.width))
-        layout.y = layout.y.coerceIn(0, max(0, metrics.heightPixels - layout.height))
+        spring = Spring(view, layout)
+        view.scaleX = .3f
+        view.scaleY = .3f
+        view.alpha = 0f
+        view.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(320)
+            .setInterpolator(OvershootInterpolator(2.2f)).start()
     }
 
     private fun removeBubble() {
+        removeMenu()
+        spring?.stop()
+        spring = null
         bubble?.let { runCatching { windowManager?.removeView(it) } }
         bubble = null
         params = null
@@ -192,12 +276,89 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
     }
 
     private fun onLongPress() {
-        if (mode == Mode.Idle) {
-            dismissedFor = focusedEditable()
-            removeBubble()
-        } else {
-            recognizer?.cancel()
+        if (mode == Mode.Idle) showMenu() else recognizer?.cancel()
+    }
+
+    private var menu: View? = null
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun showMenu() {
+        val manager = windowManager ?: return
+        val anchor = params ?: return
+        removeMenu()
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(6), 0, dp(6))
+            background = GradientDrawable().apply {
+                setColor(0xF51C1B33.toInt())
+                cornerRadius = dp(18).toFloat()
+                setStroke(dp(1), 0x1FFFFFFF)
+            }
+            clipToOutline = true
+            // Touching anywhere else closes the menu, like a popup.
+            setOnTouchListener { _, event ->
+                if (event.actionMasked == MotionEvent.ACTION_OUTSIDE) removeMenu()
+                false
+            }
         }
+        fun item(text: Int, action: () -> Unit) = card.addView(TextView(this).apply {
+            setText(text)
+            setTextColor(0xFFFFFFFF.toInt())
+            textSize = 15f
+            minWidth = dp(200)
+            setPadding(dp(20), dp(13), dp(24), dp(13))
+            background = RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), null, ColorDrawable(0xFFFFFFFF.toInt()))
+            setOnClickListener {
+                removeMenu()
+                action()
+            }
+        })
+        item(if (hideKeyboard) R.string.floating_mic_show_keyboard else R.string.floating_mic_hide_keyboard) {
+            hideKeyboard = !hideKeyboard
+            preferences.edit().putBoolean(KeyHideKeyboard, hideKeyboard).apply()
+            refresh()
+        }
+        item(R.string.floating_mic_hide_here) {
+            dismissedFor = focusedEditable()
+            refresh()
+        }
+        item(R.string.floating_mic_turn_off) {
+            scope.launch { setSetting(FLOATING_MIC_BUBBLE, false) }
+        }
+        item(R.string.floating_mic_settings) { openVoiceSettings() }
+
+        card.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
+        val area = usableArea()
+        val onRight = anchor.x + anchor.width / 2 > area.centerX()
+        // Opens beside the disc, toward the middle of the screen.
+        val discGap = (anchor.width - dp(FloatingMicBubbleView.RadiusDp * 2)) / 2 - dp(8)
+        val layout = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = (if (onRight) anchor.x + discGap - card.measuredWidth else anchor.x + anchor.width - discGap)
+                .coerceIn(area.left, max(area.left, area.right - card.measuredWidth))
+            y = (anchor.y + anchor.height / 2 - card.measuredHeight / 2)
+                .coerceIn(area.top, max(area.top, area.bottom - card.measuredHeight))
+        }
+        runCatching { manager.addView(card, layout) }.onSuccess {
+            menu = card
+            card.pivotX = if (onRight) card.measuredWidth.toFloat() else 0f
+            card.pivotY = (anchor.y + anchor.height / 2 - layout.y).toFloat()
+            card.scaleX = .6f
+            card.scaleY = .6f
+            card.alpha = 0f
+            card.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(220)
+                .setInterpolator(OvershootInterpolator(1.6f)).start()
+        }
+    }
+
+    private fun removeMenu() {
+        menu?.let { runCatching { windowManager?.removeView(it) } }
+        menu = null
     }
 
     private fun startDictation() {
@@ -240,7 +401,11 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
 
     private fun setMode(value: Mode) {
         mode = value
-        bubble?.mode = value
+        bubble?.state = when (value) {
+            Mode.Idle -> FloatingMicBubbleView.State.Idle
+            Mode.Recording -> FloatingMicBubbleView.State.Recording
+            Mode.Processing -> FloatingMicBubbleView.State.Processing
+        }
         // The system mutes the mic of accessibility services while the screen is off.
         params?.let { layout ->
             layout.flags = if (value == Mode.Idle) layout.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON.inv()
@@ -305,10 +470,9 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
             toast("No text field is focused. Dictation copied to clipboard.")
             return
         }
-        // Before API 26 an empty field reports its hint as text, indistinguishable from real text
-        // except by matching the hint.
-        val showingHint = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) node.isShowingHintText
-            else node.hintText?.toString()?.let { it.isNotEmpty() && it == node.text?.toString() } == true
+        // An empty field reports its hint as text. Android 7 has no API to tell the two apart, so
+        // there the hint may stay in front of the dictation.
+        val showingHint = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && node.isShowingHintText
         val splice = spliceDictation(
             current = if (showingHint) "" else node.text?.toString().orEmpty(),
             selectionStart = node.textSelectionStart,
@@ -362,16 +526,16 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
                 setColor(0xE6202124.toInt())
                 cornerRadius = dp(12).toFloat()
             }
-            setOnClickListener { removeMessage() }
         }
         val layout = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            // Touches pass through, so a note over the keyboard never swallows a key press.
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
             PixelFormat.TRANSLUCENT,
         ).apply {
-            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            y = dp(96)
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            y = usableArea().top + dp(12)
         }
         runCatching { manager.addView(view, layout) }.onSuccess {
             message = view
@@ -387,6 +551,68 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
         message = null
     }
 
+    /**
+     * Damped spring that carries the bubble window to its docked spot. It starts with the fling's
+     * velocity, so a throw overshoots the edge a little and settles back.
+     */
+    private inner class Spring(
+        private val view: View,
+        private val layout: WindowManager.LayoutParams,
+    ) : Runnable {
+        private var x = 0f
+        private var y = 0f
+        private var vx = 0f
+        private var vy = 0f
+        private var targetX = 0f
+        private var targetY = 0f
+        private var lastFrame = 0L
+        private var running = false
+
+        fun animateTo(x: Int, y: Int, velocityX: Float, velocityY: Float) {
+            this.x = layout.x.toFloat()
+            this.y = layout.y.toFloat()
+            vx = velocityX
+            vy = velocityY
+            targetX = x.toFloat()
+            targetY = y.toFloat()
+            lastFrame = 0L
+            if (!running) {
+                running = true
+                view.postOnAnimation(this)
+            }
+        }
+
+        fun stop() {
+            running = false
+            view.removeCallbacks(this)
+        }
+
+        override fun run() {
+            if (!running || !view.isAttachedToWindow) {
+                running = false
+                return
+            }
+            val now = SystemClock.uptimeMillis()
+            var dt = if (lastFrame == 0L) .016f else min(now - lastFrame, 50L) / 1000f
+            lastFrame = now
+            val damping = 2f * DampingRatio * sqrt(Stiffness)
+            // Small fixed steps keep the integration stable when a frame runs long.
+            while (dt > 0f) {
+                val h = min(dt, .004f)
+                vx += (-Stiffness * (x - targetX) - damping * vx) * h
+                vy += (-Stiffness * (y - targetY) - damping * vy) * h
+                x += vx * h
+                y += vy * h
+                dt -= h
+            }
+            val settled = abs(x - targetX) < .5f && abs(y - targetY) < .5f && abs(vx) + abs(vy) < 30f
+            layout.x = if (settled) targetX.roundToInt() else x.roundToInt()
+            layout.y = if (settled) targetY.roundToInt() else y.roundToInt()
+            runCatching { windowManager?.updateViewLayout(view, layout) }
+            if (settled) running = false else view.postOnAnimation(this)
+        }
+    }
+
     private inner class DragOrTap(
         private val view: View,
         private val layout: WindowManager.LayoutParams,
@@ -398,101 +624,98 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
         private var startY = 0
         private var dragging = false
         private var longPressed = false
+        private var velocity: VelocityTracker? = null
         private val longPress = Runnable {
             longPressed = true
-            view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            press(false)
             onLongPress()
+        }
+
+        private fun press(down: Boolean) {
+            val scale = if (down) .88f else 1f
+            view.animate().scaleX(scale).scaleY(scale).setDuration(if (down) 120 else 320)
+                .setInterpolator(OvershootInterpolator(if (down) 0f else 3f)).start()
         }
 
         override fun onTouch(v: View, event: MotionEvent): Boolean {
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
+                    removeMenu()
+                    spring?.stop()
                     downX = event.rawX
                     downY = event.rawY
                     startX = layout.x
                     startY = layout.y
                     dragging = false
                     longPressed = false
+                    velocity?.recycle()
+                    velocity = VelocityTracker.obtain().apply { addMovement(event) }
+                    press(true)
                     view.postDelayed(longPress, ViewConfiguration.getLongPressTimeout().toLong())
                 }
                 MotionEvent.ACTION_MOVE -> {
+                    velocity?.addMovement(event)
                     val dx = event.rawX - downX
                     val dy = event.rawY - downY
-                    if (!dragging && (abs(dx) > slop || abs(dy) > slop)) {
+                    if (!dragging && !longPressed && (abs(dx) > slop || abs(dy) > slop)) {
                         dragging = true
                         view.removeCallbacks(longPress)
+                        // Lifted while it follows the finger.
+                        view.animate().scaleX(1.08f).scaleY(1.08f).setDuration(150).start()
                     }
-                    if (dragging && !longPressed && view.isAttachedToWindow) {
+                    if (dragging && view.isAttachedToWindow) {
                         layout.x = startX + dx.toInt()
                         layout.y = startY + dy.toInt()
-                        clampToScreen(layout)
-                        windowManager?.updateViewLayout(view, layout)
+                        runCatching { windowManager?.updateViewLayout(view, layout) }
                     }
                 }
                 MotionEvent.ACTION_UP -> {
                     view.removeCallbacks(longPress)
+                    velocity?.addMovement(event)
+                    velocity?.computeCurrentVelocity(1000)
+                    val vx = velocity?.xVelocity ?: 0f
+                    val vy = velocity?.yVelocity ?: 0f
+                    velocity?.recycle()
+                    velocity = null
                     if (dragging) {
-                        preferences.edit().putInt("x", layout.x).putInt("y", layout.y).apply()
+                        press(false)
+                        snap(vx, vy)
                     } else if (!longPressed) {
+                        press(false)
                         view.performClick()
                         onTap()
                     }
                 }
-                MotionEvent.ACTION_CANCEL -> view.removeCallbacks(longPress)
+                MotionEvent.ACTION_CANCEL -> {
+                    view.removeCallbacks(longPress)
+                    velocity?.recycle()
+                    velocity = null
+                    press(false)
+                    if (dragging) snap(0f, 0f)
+                }
             }
             return true
         }
-    }
 
-    private class BubbleView(context: Context) : View(context) {
-        var mode = Mode.Idle
-            set(value) { field = value; level = 0f; invalidate() }
-        var level = 0f
-            set(value) { field = value; invalidate() }
-
-        private val density = context.resources.displayMetrics.density
-        private val logo = AppCompatResources.getDrawable(context, R.drawable.openwispr_logo)
-        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xF0FFFFFF.toInt() }
-        private val shadow = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x33000000 }
-        private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeWidth = 3f * density
-            strokeCap = Paint.Cap.ROUND
-        }
-        private val arc = RectF()
-
-        override fun onDraw(canvas: Canvas) {
-            val cx = width / 2f
-            val cy = height / 2f
-            val radius = min(width, height) / 2f - 8f * density
-            canvas.drawCircle(cx, cy + density, radius + density, shadow)
-            canvas.drawCircle(cx, cy, radius, fill)
-
-            val inset = (radius * 0.45f).toInt()
-            logo?.setBounds((cx - radius).toInt() + inset, (cy - radius).toInt() + inset,
-                (cx + radius).toInt() - inset, (cy + radius).toInt() - inset)
-            logo?.draw(canvas)
-
-            when (mode) {
-                Mode.Idle -> Unit
-                Mode.Recording -> {
-                    ring.color = 0xFFF23C91.toInt()
-                    canvas.drawCircle(cx, cy, radius + (2f + 5f * level.coerceIn(0f, 1f)) * density, ring)
-                }
-                Mode.Processing -> {
-                    ring.color = 0xFF3024ED.toInt()
-                    val r = radius + 3f * density
-                    arc.set(cx - r, cy - r, cx + r, cy + r)
-                    val sweepStart = (SystemClock.uptimeMillis() % 1000L) * 0.36f
-                    canvas.drawArc(arc, sweepStart, 90f, false, ring)
-                    postInvalidateOnAnimation()
-                }
-            }
+        /** Dock to the edge the bubble was thrown toward, near the height where it was let go. */
+        private fun snap(vx: Float, vy: Float) {
+            val area = usableArea()
+            val projectedCenter = layout.x + layout.width / 2 + vx * .15f
+            val right = projectedCenter > area.centerX()
+            val y = clampY((layout.y + vy * .08f).toInt(), layout.height)
+            preferences.edit().putBoolean(KeyRight, right).putInt(KeyY, y).apply()
+            spring?.animateTo(dockedX(right, layout.width), y, vx, vy)
         }
     }
 
     companion object {
-        private const val BubbleSizeDp = 72
+        private const val KeyRight = "docked_right"
+        private const val KeyY = "docked_y"
+        private const val KeyHideKeyboard = "hide_keyboard"
+        private const val EdgeGapDp = 8
+        private const val Stiffness = 420f
+        private const val DampingRatio = .55f
 
         fun isEnabled(context: Context): Boolean {
             val component = ComponentName(context, FloatingMicService::class.java)

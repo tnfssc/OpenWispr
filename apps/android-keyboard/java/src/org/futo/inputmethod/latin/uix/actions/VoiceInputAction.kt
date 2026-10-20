@@ -268,7 +268,7 @@ private class VoiceInputActionWindow(
 }
 
 val VoiceInputAction = Action(
-    icon = R.drawable.openwispr_logo,
+    icon = R.drawable.openwispr_glyph,
     tintIcon = false,
     name = R.string.action_voice_input_title,
     simplePressImpl = null,
