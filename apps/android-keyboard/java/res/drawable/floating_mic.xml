@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Mic inside a bubble: toggles the floating mic. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#00000000" android:strokeColor="#ffffff" android:strokeWidth="2"
+        android:pathData="M12,2a10,10 0,1 0,0.01 0z" />
+    <path android:fillColor="#ffffff"
+        android:pathData="M12,6.5a2.25,2.25 0,0 1,2.25 2.25v3a2.25,2.25 0,0 1,-4.5 0v-3a2.25,2.25 0,0 1,2.25 -2.25z" />
+    <path android:fillColor="#00000000" android:strokeColor="#ffffff" android:strokeWidth="1.6" android:strokeLineCap="round"
+        android:pathData="M8.5,11.5a3.5,3.5 0,0 0,7 0M12,15v2.2" />
+</vector>

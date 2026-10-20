@@ -2,6 +2,8 @@
 name: Floating mic uses an accessibility service
 description: Why the keyboard-free floating mic is an AccessibilityService overlay, and its trade-offs
 ---
+The bubble docks to the left or right screen edge with a damped spring after a drag or fling.
+
 The user wanted a mic bubble with the keyboard hidden, to keep screen space. Two designs were offered:
 collapsing the IME to a floating bubble (no new permissions, but only while OpenWispr is the active
 keyboard) or a system overlay plus accessibility. The user chose accessibility.

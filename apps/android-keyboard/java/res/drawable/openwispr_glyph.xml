@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Small-size OpenWispr mark: the logo's five voice strokes as bold bars, legible at toolbar size. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:strokeColor="#6B6BFF" android:strokeWidth="2.6" android:strokeLineCap="round" android:pathData="M3.6,10V14" />
+    <path android:strokeColor="#FF7049" android:strokeWidth="2.6" android:strokeLineCap="round" android:pathData="M7.8,6.5V17.5" />
+    <path android:strokeColor="#FFDC35" android:strokeWidth="2.6" android:strokeLineCap="round" android:pathData="M12,3.5V20.5" />
+    <path android:strokeColor="#2ECB98" android:strokeWidth="2.6" android:strokeLineCap="round" android:pathData="M16.2,7.5V16.5" />
+    <path android:strokeColor="#F23C91" android:strokeWidth="2.6" android:strokeLineCap="round" android:pathData="M20.4,10.5V13.5" />
+</vector>

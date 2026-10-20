@@ -344,7 +344,8 @@ private fun OpenWisprFloatingMicSettings() {
 
     SettingsForm {
         Text("A small mic bubble appears while a text field is focused and the keyboard is hidden, so you keep the whole screen and can still dictate.")
-        Text("Tap the bubble to start, tap again to stop. Long-press cancels a recording, or hides the bubble for the current field. Drag it anywhere.")
+        Text("Tap the bubble to start, tap again to stop. Long-press cancels a recording; when idle it opens options, including hiding the keyboard so you type by voice only. Drag it and it springs to the nearest screen edge.")
+        Text("The Floating mic button in the keyboard toolbar switches the bubble on and off.")
         Text("Android requires accessibility access for this. OpenWispr uses it only to find the focused text field and insert your dictation. Recordings go to your speech provider, same as the keyboard mic.")
         Text(
             if (enabled) "Floating mic is on." else "Floating mic is off.",
