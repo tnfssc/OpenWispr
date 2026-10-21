@@ -1,5 +1,9 @@
 package org.futo.inputmethod.latin.openwispr
 
+import app.openwispr.OpenWisprConfig
+import app.openwispr.OpenWisprTranscriptionBackend
+import app.openwispr.ProviderHttpException
+import app.openwispr.speechFailureMessage
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test

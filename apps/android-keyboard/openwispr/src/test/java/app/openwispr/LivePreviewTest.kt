@@ -1,7 +1,5 @@
-package org.futo.inputmethod.latin.openwispr
+package app.openwispr
 
-import org.futo.voiceinput.shared.PreviewTranscript
-import org.futo.voiceinput.shared.previewPcmBytes
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Test

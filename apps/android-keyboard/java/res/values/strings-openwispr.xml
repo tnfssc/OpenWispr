@@ -11,8 +11,6 @@
     <string name="openwispr_refinement_title" translatable="false">Text refinement</string>
     <string name="openwispr_refinement_subtitle" translatable="false">Optional transcript cleanup</string>
     <string name="openwispr_network_notice" translatable="false">Voice recordings are sent to your selected provider. Typing, predictions, and swipe input remain local.</string>
-    <string name="openwispr_system_voice_title" translatable="false">Use Android system voice input</string>
-    <string name="openwispr_system_voice_subtitle" translatable="false">Bypass OpenWispr and launch an external voice-input app</string>
     <string name="openwispr_not_configured" translatable="false">Configure OpenWispr voice input before dictating</string>
     <string name="openwispr_modified_fork_notice" translatable="false">Modified non-commercial FUTO Keyboard fork by OpenWispr. Voice input uses user-configured network providers and is not an official FUTO release.</string>
     <string name="openwispr_floating_mic_title" translatable="false">OpenWispr floating mic</string>

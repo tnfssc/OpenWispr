@@ -44,18 +44,8 @@ val AUDIO_FOCUS = SettingsKey(
     default = true
 )
 
-/** Silence before recording stops on its own; 0 keeps recording until the user taps stop. */
-val VAD_SILENCE_TIMEOUT_MS = SettingsKey(
-    key = intPreferencesKey("vad_silence_timeout_ms"),
-    default = 5000
-)
-
-/**
- * Whether the floating mic bubble shows. Separate from the accessibility service being enabled,
- * which only Android settings can change, so the keyboard toolbar can switch the bubble quickly.
- */
-val FLOATING_MIC_BUBBLE = SettingsKey(
-    key = booleanPreferencesKey("floating_mic_bubble"),
+val USE_VAD_AUTOSTOP = SettingsKey(
+    key = booleanPreferencesKey("use_vad_autostop"),
     default = true
 )
 

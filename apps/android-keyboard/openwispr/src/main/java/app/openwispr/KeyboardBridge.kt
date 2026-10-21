@@ -1,4 +1,4 @@
-package org.futo.inputmethod.latin.openwispr
+package app.openwispr
 
 import android.inputmethodservice.InputMethodService
 import android.os.Build

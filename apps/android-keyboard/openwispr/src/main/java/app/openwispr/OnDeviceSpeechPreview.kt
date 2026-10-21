@@ -1,4 +1,4 @@
-package org.futo.voiceinput.shared
+package app.openwispr
 
 import android.content.Context
 import android.content.Intent
@@ -18,6 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import org.futo.voiceinput.shared.AudioPreview
 import java.util.Locale
 
 /** Android 13+ can feed the existing capture to the on-device recognizer through a pipe. */

@@ -17,3 +17,4 @@ dependencyResolutionManagement {
     }
 }
 include ':voiceinput-shared'
+include ':openwispr'

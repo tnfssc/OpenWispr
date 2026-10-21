@@ -1,8 +1,8 @@
 package org.futo.inputmethod.latin.openwispr
 
+import app.openwispr.VoiceSetupProgress
 import android.content.Context
 import androidx.test.platform.app.InstrumentationRegistry
-import org.futo.inputmethod.latin.uix.settings.pages.VoiceSetupStore
 import org.junit.After
 import org.junit.Before
 import org.junit.Assert.*

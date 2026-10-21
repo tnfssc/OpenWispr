@@ -33,6 +33,7 @@ import org.futo.inputmethod.latin.uix.settings.pages.DevKeyboardScreen
 import org.futo.inputmethod.latin.uix.settings.pages.DevLayoutEdit
 import org.futo.inputmethod.latin.uix.settings.pages.DevLayoutEditor
 import org.futo.inputmethod.latin.uix.settings.pages.DevLayoutList
+import org.futo.inputmethod.latin.uix.settings.pages.DevPaletteScreen
 import org.futo.inputmethod.latin.uix.settings.pages.DevThemeImportScreen
 import org.futo.inputmethod.latin.uix.settings.pages.DeveloperScreen
 import org.futo.inputmethod.latin.uix.settings.pages.HelpMenu
@@ -46,9 +47,9 @@ import org.futo.inputmethod.latin.uix.settings.pages.LanguagesScreen
 import org.futo.inputmethod.latin.uix.settings.pages.LongPressMenu
 import org.futo.inputmethod.latin.uix.settings.pages.MiscMenu
 import org.futo.inputmethod.latin.uix.settings.pages.NumberRowSettingMenu
-import org.futo.inputmethod.latin.uix.settings.pages.OpenWisprRefinementMenu
-import org.futo.inputmethod.latin.uix.settings.pages.OpenWisprSpeechMenu
-import org.futo.inputmethod.latin.uix.settings.pages.OpenWisprFloatingMicMenu
+import org.futo.inputmethod.latin.openwispr.OpenWisprRefinementMenu
+import org.futo.inputmethod.latin.openwispr.OpenWisprSpeechMenu
+import org.futo.inputmethod.latin.openwispr.OpenWisprFloatingMicMenu
 import org.futo.inputmethod.latin.uix.settings.pages.PaymentScreen
 import org.futo.inputmethod.latin.uix.settings.pages.PaymentThankYouScreen
 import org.futo.inputmethod.latin.uix.settings.pages.PredictiveTextMenu
@@ -183,6 +184,7 @@ fun SettingsNavigator(
             composable("devlayouts") { DevLayoutList(navController) }
             composable("devlayouteditor") { DevLayoutEditor(navController) }
             composable("devtheme") { DevThemeImportScreen(navController) }
+            composable("dynamicpalette") { DevPaletteScreen(navController) }
             composable("devkeyboard") { DevKeyboardScreen(navController) }
             composable("blacklist") { BlacklistScreen(navController) }
             composable("payment") { PaymentScreen(navController) { navController.navigateUp() } }

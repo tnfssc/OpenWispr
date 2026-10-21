@@ -32,6 +32,7 @@ import androidx.navigation.compose.rememberNavController
 import org.futo.inputmethod.latin.BuildConfig
 import org.futo.inputmethod.latin.R
 import org.futo.inputmethod.latin.uix.LocalNavController
+import org.futo.inputmethod.latin.uix.SYSTEM_VOICE_INPUT_PACKAGE
 import org.futo.inputmethod.latin.uix.TextEditPopupActivity
 import org.futo.inputmethod.latin.uix.USE_SYSTEM_VOICE_INPUT
 import org.futo.inputmethod.latin.uix.settings.NavigationItem
@@ -79,11 +80,15 @@ val HomeScreenLite = UserSettingsMenu(
             name = R.string.voice_input_settings_title
         ) {
             val navController = LocalNavController.current
+            val useExternal = useDataStoreValue(USE_SYSTEM_VOICE_INPUT)
+            val externalPkg = useDataStoreValue(SYSTEM_VOICE_INPUT_PACKAGE)
+            val name = usePackageReadableName(externalPkg)
+
             NavigationItem(
                 title = stringResource(R.string.voice_input_settings_title),
                 style = NavigationItemStyle.HomePrimary,
-                subtitle = if(useDataStoreValue(USE_SYSTEM_VOICE_INPUT)) {
-                    stringResource(R.string.voice_input_settings_builtin_disabled_notice)
+                subtitle = if(useExternal && name != null) {
+                    stringResource(R.string.voice_input_settings_builtin_disabled_notice2, name)
                 } else { null },
                 navigate = { navController!!.navigate(VoiceInputMenu.navPath) },
                 icon = painterResource(R.drawable.mic_fill)

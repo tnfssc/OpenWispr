@@ -121,11 +121,11 @@ import org.futo.inputmethod.latin.common.Constants
 import org.futo.inputmethod.latin.settings.Settings
 import org.futo.inputmethod.latin.suggestions.SuggestionStripViewListener
 import org.futo.inputmethod.latin.uix.actions.ActionEditor
+import org.futo.inputmethod.latin.openwispr.InlineDictation
 import org.futo.inputmethod.latin.uix.actions.ActionRegistry
 import org.futo.inputmethod.latin.uix.actions.AllActions
 import org.futo.inputmethod.latin.uix.actions.BugViewerAction
 import org.futo.inputmethod.latin.uix.actions.BugViewerState
-import org.futo.inputmethod.latin.uix.actions.InlineDictation
 import org.futo.inputmethod.latin.uix.actions.KeyboardModeAction
 import org.futo.inputmethod.latin.uix.actions.PersistentEmojiState
 import org.futo.inputmethod.latin.uix.actions.keyCode
@@ -658,12 +658,13 @@ class UixManager(private val latinIME: LatinIME) {
 
     val isMainKeyboardHidden get() = mainKeyboardHidden.value
 
-    private fun onActionActivatedInternal(rawAction: Action) {
+    private fun onActionActivatedInternal(rawAction: Action, skipOverride: Boolean = false) {
         resizers.hideResizer()
 
-        val action = runBlocking {
+        val action = if(skipOverride)
+            rawAction
+        else
             ActionRegistry.getActionOverride(latinIME, rawAction)
-        }
 
         if (action.windowImpl != null) {
             enterActionWindowView(action)
@@ -674,11 +675,13 @@ class UixManager(private val latinIME: LatinIME) {
         }
     }
 
-    private fun onActionAltActivatedInternal(rawAction: Action) {
-        val action = runBlocking {
-            ActionRegistry.getActionOverride(latinIME, rawAction)
-        }
+    /// public function to skip action override for voice input
+    fun activateInternalVoiceIME() {
+        onActionActivatedInternal(org.futo.inputmethod.latin.uix.actions.VoiceInputAction, skipOverride = true)
+    }
 
+    private fun onActionAltActivatedInternal(rawAction: Action) {
+        val action = ActionRegistry.getActionOverride(latinIME, rawAction)
         action.altPressImpl?.invoke(keyboardManagerForAction, persistentStates[action])
     }
 

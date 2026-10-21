@@ -1,4 +1,4 @@
-package org.futo.inputmethod.latin.openwispr
+package app.openwispr
 
 import android.util.Base64
 import org.futo.voiceinput.shared.AudioTranscriptionBackend

@@ -1,4 +1,4 @@
-package org.futo.inputmethod.latin.openwispr
+package app.openwispr
 
 import org.futo.voiceinput.shared.SpeechWave
 import org.futo.voiceinput.shared.pcmRms

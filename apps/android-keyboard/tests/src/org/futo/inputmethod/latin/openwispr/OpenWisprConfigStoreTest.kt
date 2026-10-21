@@ -1,5 +1,8 @@
 package org.futo.inputmethod.latin.openwispr
 
+import app.openwispr.OpenWisprConfig
+import app.openwispr.OpenWisprProvider
+import app.openwispr.OpenWisprTranscriptionBackend
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.runBlocking
 import org.futo.inputmethod.latin.uix.forceUnlockDatastore

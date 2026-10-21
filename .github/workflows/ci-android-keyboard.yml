@@ -44,7 +44,7 @@ jobs:
           BRANCH_NAME: develop
         run: >-
           ./gradlew --max-workers=2
-          testUnstableDebugUnitTest compileUnstableDebugAndroidTestJavaWithJavac
+          :openwispr:testDebugUnitTest testUnstableDebugUnitTest compileUnstableDebugAndroidTestJavaWithJavac
           assembleUnstableDebug assembleStableRelease
 
       - name: Upload APKs and test results
@@ -55,4 +55,5 @@ jobs:
             apps/android-keyboard/build/outputs/apk/unstable/debug/*.apk
             apps/android-keyboard/build/outputs/apk/stable/release/*.apk
             apps/android-keyboard/build/reports/tests/testUnstableDebugUnitTest/
+            apps/android-keyboard/openwispr/build/reports/tests/testDebugUnitTest/
           retention-days: 7

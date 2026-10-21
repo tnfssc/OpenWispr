@@ -61,6 +61,7 @@ public class KeyPreviewView extends androidx.appcompat.widget.AppCompatTextView 
     public KeyPreviewView(final Context context, final AttributeSet attrs, final int defStyleAttr) {
         super(context, attrs, defStyleAttr);
         setGravity(Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        setIncludeFontPadding(false);
 
         mDrawableProvider = DynamicThemeProvider.obtainFromContext(context);
     }
