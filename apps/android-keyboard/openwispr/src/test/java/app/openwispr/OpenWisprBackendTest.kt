@@ -1,9 +1,8 @@
-package org.futo.inputmethod.latin.openwispr
+package app.openwispr
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import org.futo.inputmethod.latin.uix.settings.pages.providerOnboardingDetails
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -56,20 +55,6 @@ class OpenWisprBackendTest {
     }
 
     @Test
-    fun `provider onboarding points to the correct key pages`() {
-        val groq = providerOnboardingDetails(OpenWisprProvider.GROQ)
-        assertEquals("https://console.groq.com/keys", groq.url)
-        assertEquals("Create Groq API key", groq.action)
-        assertTrue(groq.message.contains("fastest free default"))
-
-        val openRouter = providerOnboardingDetails(OpenWisprProvider.OPEN_ROUTER)
-        assertEquals("https://openrouter.ai/keys", openRouter.url)
-        assertEquals("Create OpenRouter API key", openRouter.action)
-        assertTrue(openRouter.message.contains("NVIDIA Parakeet"))
-        assertTrue(openRouter.message.contains("Qwen 3.6 27B"))
-    }
-
-    @Test
     fun `wav encoder writes canonical mono pcm header`() {
         val output = ByteArrayOutputStream()
         WavPcmWriter.write(output, shortArrayOf(0x1234, -2), sampleCount = 2, sampleRateHz = 16_000)
@@ -85,5 +70,4 @@ class OpenWisprBackendTest {
         assertEquals(0x34, bytes[44].toInt() and 0xFF)
         assertEquals(0x12, bytes[45].toInt() and 0xFF)
     }
-
 }

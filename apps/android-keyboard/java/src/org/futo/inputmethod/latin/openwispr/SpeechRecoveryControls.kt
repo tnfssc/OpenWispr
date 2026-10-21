@@ -3,6 +3,10 @@ package org.futo.inputmethod.latin.openwispr
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import app.openwispr.FailedSpeechStore
+import app.openwispr.OpenWisprTranscriptionBackend
+import app.openwispr.retryFailedSpeech
+import app.openwispr.speechFailureMessage
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column

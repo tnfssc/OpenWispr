@@ -8,6 +8,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import org.futo.inputmethod.keyboard.internal.KeyboardCodesSet
 import org.futo.inputmethod.latin.R
 import org.futo.inputmethod.latin.common.Constants
+import org.futo.inputmethod.latin.openwispr.FloatingMicAction
+import org.futo.inputmethod.latin.openwispr.VoiceInputPanelAction
 import org.futo.inputmethod.latin.settings.Settings
 import org.futo.inputmethod.latin.uix.Action
 import org.futo.inputmethod.latin.uix.PreferenceUtils

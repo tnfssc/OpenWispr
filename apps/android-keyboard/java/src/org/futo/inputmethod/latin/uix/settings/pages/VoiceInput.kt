@@ -19,7 +19,7 @@ import org.futo.inputmethod.latin.uix.ENABLE_SOUND
 import org.futo.inputmethod.latin.uix.PREFER_BLUETOOTH
 import org.futo.inputmethod.latin.uix.SYSTEM_VOICE_INPUT_PACKAGE
 import org.futo.inputmethod.latin.uix.USE_SYSTEM_VOICE_INPUT
-import org.futo.inputmethod.latin.uix.VAD_SILENCE_TIMEOUT_MS
+import org.futo.inputmethod.latin.openwispr.VAD_SILENCE_TIMEOUT_MS
 import org.futo.inputmethod.latin.uix.settings.DropDownPickerSettingItem
 import org.futo.inputmethod.latin.uix.settings.NavigationItemStyle
 import org.futo.inputmethod.latin.uix.settings.Tip

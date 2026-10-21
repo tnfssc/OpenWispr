@@ -1,4 +1,4 @@
-package org.futo.inputmethod.latin.openwispr
+package app.openwispr
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking

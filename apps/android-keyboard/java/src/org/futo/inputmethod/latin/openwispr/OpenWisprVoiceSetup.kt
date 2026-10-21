@@ -1,4 +1,4 @@
-package org.futo.inputmethod.latin.uix.settings.pages
+package org.futo.inputmethod.latin.openwispr
 
 import android.Manifest
 import android.content.Context
@@ -18,7 +18,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import org.futo.inputmethod.latin.openwispr.*
+import app.openwispr.*
 import org.futo.voiceinput.shared.*
 import org.futo.voiceinput.shared.ui.MicrophoneDeviceState
 
@@ -90,7 +90,7 @@ fun VoiceSetupTest(progress: VoiceSetupProgress, update: (VoiceSetupProgress) ->
     val store = remember { FailedSpeechStore(context.noBackupFilesDir) }
     var recovery by remember { mutableStateOf(store.exists()) }
     var view by remember { mutableStateOf<RecognizerView?>(null) }
-    var result by remember { mutableStateOf<String?>(null) }
+    var heard by remember { mutableStateOf<String?>(null) }
     var failure by remember { mutableStateOf<String?>(null) }
     var recording by remember { mutableStateOf(false) }
     val latestProgress by rememberUpdatedState(progress)
@@ -117,7 +117,7 @@ fun VoiceSetupTest(progress: VoiceSetupProgress, update: (VoiceSetupProgress) ->
     } else {
         if (view != null) Box(Modifier.fillMaxWidth().height(180.dp)) { view?.Content() }
         if (!recording) Button(onClick = {
-            result = null
+            heard = null
             failure = null
             val config = OpenWisprConfigStore.load(context)
             if (!config.isConfigured) {
@@ -131,10 +131,10 @@ fun VoiceSetupTest(progress: VoiceSetupProgress, update: (VoiceSetupProgress) ->
                     latestRecoveryChanged(recovery)
                 }
                 override fun recordingStarted(device: MicrophoneDeviceState) = Unit
-                override fun finished(text: String) {
+                override fun finished(result: String) {
                     recording = false
-                    result = text.ifBlank { "No speech was recognized. Try again." }
-                    latestUpdate(latestProgress.tested(text))
+                    heard = result.ifBlank { "No speech was recognized. Try again." }
+                    latestUpdate(latestProgress.tested(result))
                     view?.cancel()
                     view = null
                 }
@@ -156,7 +156,7 @@ fun VoiceSetupTest(progress: VoiceSetupProgress, update: (VoiceSetupProgress) ->
             TextButton(onClick = { view?.cancel(); view = null }) { Text("Cancel") }
         }
         failure?.let { Text(it) }
-        result?.let { Text(it) }
+        heard?.let { Text(it) }
     }
     Button(enabled = progress.testPassed && !recording && !recovery, onClick = { update(progress.finish()) }) { Text("Finish setup") }
 }

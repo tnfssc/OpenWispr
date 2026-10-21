@@ -445,6 +445,7 @@ dependencies {
     //implementation "androidx.work:work-runtime:$work_version"
 
     implementation project(":voiceinput-shared")
+    implementation project(":openwispr")
 
     implementation "com.charleskorn.kaml:kaml:0.104.0"
 

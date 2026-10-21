@@ -1,4 +1,4 @@
-package org.futo.inputmethod.latin.openwispr
+package app.openwispr
 
 /** Progress is separate from provider settings; reopening never resets credentials. */
 data class VoiceSetupProgress(

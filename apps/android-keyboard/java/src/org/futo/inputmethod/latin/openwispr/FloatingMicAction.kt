@@ -1,15 +1,13 @@
-package org.futo.inputmethod.latin.uix.actions
+package org.futo.inputmethod.latin.openwispr
 
 import kotlinx.coroutines.launch
 import org.futo.inputmethod.latin.R
-import org.futo.inputmethod.latin.openwispr.FloatingMicService
 import org.futo.inputmethod.latin.uix.Action
-import org.futo.inputmethod.latin.uix.FLOATING_MIC_BUBBLE
 import org.futo.inputmethod.latin.uix.getSetting
 import org.futo.inputmethod.latin.uix.setSetting
 import org.futo.inputmethod.latin.uix.settings.SettingsActivity
 
-/** Switches the floating mic bubble on or off; the bubble itself appears once the keyboard hides. */
+/** Switches the floating mic bubble on or off from the keyboard toolbar. */
 val FloatingMicAction = Action(
     icon = R.drawable.floating_mic,
     name = R.string.action_floating_mic_title,

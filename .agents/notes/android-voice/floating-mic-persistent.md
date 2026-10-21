@@ -22,3 +22,7 @@ Chrome needs several workarounds, found on the API 36 emulator:
   (cleared on focus change) and prefers it. Without this, the second dictation landed at the start.
 - The service does not subscribe to text-change events, so cached nodes hold old text. `insert`
   refreshes the node first; otherwise a dictation could replace the previous one.
+
+Apps that send no selection event for an accessibility edit (Obtainium, Flutter) left `reportedCaret`
+at the caret from the user's last typing, so the next dictation landed there instead of after the
+previous one. `FieldWriter` now records the caret it places itself after each insert and undo.

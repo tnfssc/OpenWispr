@@ -1,0 +1,41 @@
+// OpenWispr's own code that needs nothing from the keyboard: provider calls, failed-speech recovery,
+// dictation into other apps' fields, and the mic visuals. Keyboard glue lives in the app module under
+// org.futo.inputmethod.latin.openwispr, so upstream FUTO files stay mostly untouched.
+plugins {
+    id 'com.android.library'
+    id 'org.jetbrains.kotlin.android'
+    id 'org.jetbrains.kotlin.plugin.compose'
+}
+
+android {
+    namespace = 'app.openwispr'
+    compileSdk = 36
+
+    defaultConfig {
+        minSdk = 24
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+    }
+
+    kotlinOptions {
+        jvmTarget = '1.8'
+    }
+
+    buildFeatures {
+        compose = true
+    }
+}
+
+dependencies {
+    api project(':voiceinput-shared')
+
+    implementation 'androidx.core:core-ktx:1.18.0'
+    implementation platform('androidx.compose:compose-bom:2026.06.01')
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.material3:material3'
+
+    testImplementation 'junit:junit:4.13.2'
+}

@@ -1,4 +1,4 @@
-package org.futo.inputmethod.latin.openwispr
+package app.openwispr
 
 import android.animation.ArgbEvaluator
 import android.content.Context
@@ -11,21 +11,16 @@ import android.graphics.SweepGradient
 import android.os.SystemClock
 import android.view.View
 import org.futo.voiceinput.shared.SpeechWave
-import kotlin.math.PI
-import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.pow
-import kotlin.math.sin
 
 /**
  * The floating mic bubble: a dark disc carrying the OpenWispr bars. Recording turns it warm and
  * drives the bars with the voice alone; transcribing turns it indigo with a travelling wave and a
  * spinning brand-colour ring, so the state reads at a glance without any text.
  */
-internal class FloatingMicBubbleView(context: Context) : View(context) {
-    enum class State { Idle, Recording, Processing }
-
-    var state = State.Idle
+class FloatingMicBubbleView(context: Context) : View(context) {
+    var state = DictationPhase.Idle
         set(value) {
             if (field == value) return
             field = value
@@ -70,7 +65,7 @@ internal class FloatingMicBubbleView(context: Context) : View(context) {
     private val arc = RectF()
     private val evaluator = ArgbEvaluator()
 
-    private var fromColors = colorsFor(State.Idle)
+    private var fromColors = colorsFor(DictationPhase.Idle)
     private var colorProgress = 1f
     /** Recent voice energy; each bar replays it a little later, so speech ripples outward. */
     private var speech = SpeechWave()
@@ -81,10 +76,10 @@ internal class FloatingMicBubbleView(context: Context) : View(context) {
         setLayerType(LAYER_TYPE_SOFTWARE, null)
     }
 
-    private fun colorsFor(state: State) = when (state) {
-        State.Idle -> intArrayOf(0xFF2E2C66.toInt(), 0xFF15142E.toInt())
-        State.Recording -> intArrayOf(0xFFFF7049.toInt(), 0xFFF23C91.toInt())
-        State.Processing -> intArrayOf(0xFF4A3FFF.toInt(), 0xFF1E168F.toInt())
+    private fun colorsFor(state: DictationPhase) = when (state) {
+        DictationPhase.Idle -> intArrayOf(0xFF2E2C66.toInt(), 0xFF15142E.toInt())
+        DictationPhase.Recording -> intArrayOf(MicVisuals.RecordingStart.toInt(), MicVisuals.RecordingEnd.toInt())
+        DictationPhase.Processing -> intArrayOf(MicVisuals.ProcessingStart.toInt(), MicVisuals.ProcessingEnd.toInt())
     }
 
     private fun currentColors(): IntArray {
@@ -97,7 +92,7 @@ internal class FloatingMicBubbleView(context: Context) : View(context) {
         val dt = if (lastFrame == 0L) 0f else min(now - lastFrame, 64L) / 1000f
         lastFrame = now
         colorProgress = min(1f, colorProgress + dt / .25f)
-        if (state == State.Recording) speech.advance(level, dt)
+        if (state == DictationPhase.Recording) speech.advance(level, dt)
         val time = now / 1000f
 
         val cx = width / 2f
@@ -106,11 +101,11 @@ internal class FloatingMicBubbleView(context: Context) : View(context) {
         disc.shader = LinearGradient(cx - radius, cy - radius, cx + radius, cy + radius,
             colors[0], colors[1], Shader.TileMode.CLAMP)
 
-        if (state == State.Recording) {
+        if (state == DictationPhase.Recording) {
             // A soft halo that swells with the voice.
             val swell = speech.levelAt(0f).pow(.7f)
             halo.strokeWidth = (2f + 4f * swell) * density
-            halo.color = 0xFFF23C91.toInt()
+            halo.color = MicVisuals.RecordingEnd.toInt()
             halo.alpha = (70 + 110 * swell).toInt()
             canvas.drawCircle(cx, cy, radius + (2f + 4f * swell) * density, halo)
         }
@@ -119,10 +114,10 @@ internal class FloatingMicBubbleView(context: Context) : View(context) {
         canvas.drawCircle(cx, cy, radius, disc)
         canvas.drawCircle(cx, cy, radius - density / 2f, rim)
 
-        if (state == State.Processing) {
+        if (state == DictationPhase.Processing) {
             val r = radius + 4f * density
             arc.set(cx - r, cy - r, cx + r, cy + r)
-            val sweep = SweepGradient(cx, cy, BrandColors + BrandColors[0], null)
+            val sweep = SweepGradient(cx, cy, IntArray(6) { MicVisuals.BrandColors[it % 5].toInt() }, null)
             canvas.save()
             canvas.rotate((time * 300f) % 360f, cx, cy)
             ring.shader = sweep
@@ -134,23 +129,13 @@ internal class FloatingMicBubbleView(context: Context) : View(context) {
         val maxHalf = 9.5f * density
         val minHalf = 1.8f * density
         for (i in 0 until 5) {
-            val shape = IdleShape[i]
-            val amount = when (state) {
-                State.Idle -> shape
-                // Only the voice moves the bars: silence leaves them low and still.
-                State.Recording -> .12f + .88f * min(1f, speech.levelAt(abs(i - 2) * .07f) * 1.3f) * (.55f + .45f * shape)
-                State.Processing -> {
-                    val wave = (sin(time * 2f * PI.toFloat() * 1.2f - i * .9f) + 1f) / 2f
-                    .25f + .75f * wave.pow(2)
-                }
-            }
-            val half = minHalf + (maxHalf - minHalf) * amount.coerceIn(0f, 1f)
+            val half = minHalf + (maxHalf - minHalf) * MicVisuals.barAmount(state, i, speech, time)
             val x = cx + (i - 2) * spacing
-            bar.color = if (state == State.Idle) BrandColors[i] else 0xFFFFFFFF.toInt()
+            bar.color = if (state == DictationPhase.Idle) MicVisuals.BrandColors[i].toInt() else 0xFFFFFFFF.toInt()
             canvas.drawLine(x, cy - half, x, cy + half, bar)
         }
 
-        if (state != State.Idle || colorProgress < 1f) postInvalidateOnAnimation()
+        if (state != DictationPhase.Idle || colorProgress < 1f) postInvalidateOnAnimation()
         else lastFrame = 0L
     }
 
@@ -159,9 +144,5 @@ internal class FloatingMicBubbleView(context: Context) : View(context) {
         /** Window size: the disc plus room for its shadow and the recording halo. */
         const val SizeDp = 76
 
-        private val BrandColors = intArrayOf(
-            0xFF6B6BFF.toInt(), 0xFFFF7049.toInt(), 0xFFFFDC35.toInt(), 0xFF2ECB98.toInt(), 0xFFF23C91.toInt(),
-        )
-        private val IdleShape = floatArrayOf(.3f, .7f, 1f, .6f, .25f)
     }
 }

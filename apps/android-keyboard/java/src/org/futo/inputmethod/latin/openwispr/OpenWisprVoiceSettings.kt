@@ -1,4 +1,4 @@
-package org.futo.inputmethod.latin.uix.settings.pages
+package org.futo.inputmethod.latin.openwispr
 
 import android.content.Intent
 import android.net.Uri
@@ -19,7 +19,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import org.futo.inputmethod.latin.openwispr.FloatingMicService
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,11 +34,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.futo.inputmethod.latin.R
-import org.futo.inputmethod.latin.openwispr.FailedSpeechStore
-import org.futo.inputmethod.latin.openwispr.SpeechRecoveryControls
-import org.futo.inputmethod.latin.openwispr.OpenWisprConfig
-import org.futo.inputmethod.latin.openwispr.OpenWisprConfigStore
-import org.futo.inputmethod.latin.openwispr.OpenWisprProvider
+import app.openwispr.FailedSpeechStore
+import app.openwispr.VoiceSetupProgress
+import app.openwispr.OpenWisprConfig
+import app.openwispr.OpenWisprProvider
 import org.futo.inputmethod.latin.uix.settings.UserSettingsMenu
 import org.futo.inputmethod.latin.uix.settings.userSettingDecorationOnly
 
@@ -66,7 +64,7 @@ private fun OpenWisprSpeechSettings() {
 
     val setupStore = remember { VoiceSetupStore(context) }
     var progress by remember { mutableStateOf(setupStore.load(config.isConfigured)) }
-    val update: (org.futo.inputmethod.latin.openwispr.VoiceSetupProgress) -> Unit = {
+    val update: (VoiceSetupProgress) -> Unit = {
         progress = it
         setupStore.save(it)
     }

@@ -1,4 +1,4 @@
-package org.futo.voiceinput.shared
+package app.openwispr
 
 /** Segmented recognizers send a partial for the current segment, not the whole recording. */
 class PreviewTranscript {

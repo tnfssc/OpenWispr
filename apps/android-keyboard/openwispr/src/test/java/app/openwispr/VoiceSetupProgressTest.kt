@@ -1,4 +1,4 @@
-package org.futo.inputmethod.latin.openwispr
+package app.openwispr
 
 import org.junit.Assert.*
 import org.junit.Test

@@ -1,4 +1,4 @@
-package org.futo.inputmethod.latin.openwispr
+package app.openwispr
 
 import java.io.OutputStream
 import java.nio.charset.StandardCharsets
