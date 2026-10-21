@@ -4,6 +4,8 @@ OpenWispr is a family of privacy-conscious dictation clients for macOS, GNOME, a
 
 ## OpenWispr Keyboard for Android
 
+https://github.com/user-attachments/assets/c38b8846-7989-406d-94db-acb134c61b37
+
 Dictate into any app from the keyboard's mic key or a floating mic. [Install it](apps/android-keyboard/README.md#install).
 
 | Client | Source | License | Status |
