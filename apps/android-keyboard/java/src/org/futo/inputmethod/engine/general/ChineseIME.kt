@@ -927,7 +927,10 @@ class ChineseIME(val helper: IMEHelper) : IMEInterface, SuggestionStripViewAcces
 
         coroScope.launch {
             rime.shutdown()
-            getUser(helper.context).deleteRecursively()
+            getUser(helper.context).let {
+                it.deleteRecursively()
+                it.mkdirs()
+            }
             rime.startup(false)
             prevConfiguration = null
         }

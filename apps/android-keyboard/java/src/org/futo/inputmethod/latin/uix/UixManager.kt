@@ -658,12 +658,13 @@ class UixManager(private val latinIME: LatinIME) {
 
     val isMainKeyboardHidden get() = mainKeyboardHidden.value
 
-    private fun onActionActivatedInternal(rawAction: Action) {
+    private fun onActionActivatedInternal(rawAction: Action, skipOverride: Boolean = false) {
         resizers.hideResizer()
 
-        val action = runBlocking {
+        val action = if(skipOverride)
+            rawAction
+        else
             ActionRegistry.getActionOverride(latinIME, rawAction)
-        }
 
         if (action.windowImpl != null) {
             enterActionWindowView(action)
@@ -674,11 +675,13 @@ class UixManager(private val latinIME: LatinIME) {
         }
     }
 
-    private fun onActionAltActivatedInternal(rawAction: Action) {
-        val action = runBlocking {
-            ActionRegistry.getActionOverride(latinIME, rawAction)
-        }
+    /// public function to skip action override for voice input
+    fun activateInternalVoiceIME() {
+        onActionActivatedInternal(org.futo.inputmethod.latin.uix.actions.VoiceInputAction, skipOverride = true)
+    }
 
+    private fun onActionAltActivatedInternal(rawAction: Action) {
+        val action = ActionRegistry.getActionOverride(latinIME, rawAction)
         action.altPressImpl?.invoke(keyboardManagerForAction, persistentStates[action])
     }
 

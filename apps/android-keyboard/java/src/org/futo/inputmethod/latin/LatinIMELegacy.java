@@ -133,7 +133,7 @@ public class LatinIMELegacy implements KeyboardActionListener,
     private View mComposeInputView;
     private InsetsUpdater mInsetsUpdater;
 
-    private RichInputMethodManager mRichImm;
+    public RichInputMethodManager mRichImm;
     public final KeyboardSwitcher mKeyboardSwitcher;
     private EmojiAltPhysicalKeyDetector mEmojiAltPhysicalKeyDetector;
 
@@ -727,7 +727,7 @@ public class LatinIMELegacy implements KeyboardActionListener,
     // completely replace #onCodeInput.
     public void onEvent(@Nonnull final Event event) {
         if (Constants.CODE_SHORTCUT == event.mKeyCode) {
-            mRichImm.switchToShortcutIme(mInputMethodService);
+            getLatinIME().trySwitchToShortcutIMEorInternal();
         }
         /*final InputTransaction completeInputTransaction =
                 mInputLogic.onCodeInput(mSettings.getCurrent(), event,
