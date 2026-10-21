@@ -39,4 +39,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
-        run: gh release create "$RELEASE_TAG" --generate-notes apps/android-keyboard/build/outputs/apk/stable/release/*.apk
+        # Titles must start with "OpenWispr Keyboard": Obtainium filters on them, because GNOME and
+        # macOS releases share this repository's release list.
+        run: |
+          cd apps/android-keyboard/build/outputs/apk/stable/release
+          sha256sum android-keyboard-stable-release.apk > android-keyboard-stable-release.apk.sha256
+          gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --title "OpenWispr Keyboard ${RELEASE_TAG#keyboard-}" --generate-notes \
+            android-keyboard-stable-release.apk android-keyboard-stable-release.apk.sha256

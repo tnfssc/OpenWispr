@@ -11,6 +11,18 @@ The canonical source, releases, issue tracking, and contribution point for this 
 
 The code is licensed under the [FUTO Source First License 1.1](LICENSE.md).
 
+## Install
+
+Download `android-keyboard-stable-release.apk` from the latest [OpenWispr Keyboard release](https://github.com/tnfssc/OpenWispr/releases?q=%22OpenWispr+Keyboard%22&expanded=true).
+
+To get updates automatically, use [Obtainium](https://github.com/ImranR98/Obtainium): open [Add OpenWispr to Obtainium](https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%20%22app.openwispr.keyboard%22%2C%20%22url%22%3A%20%22https%3A%2F%2Fgithub.com%2Ftnfssc%2FOpenWispr%22%2C%20%22author%22%3A%20%22tnfssc%22%2C%20%22name%22%3A%20%22OpenWispr%22%2C%20%22preferredApkIndex%22%3A%200%2C%20%22additionalSettings%22%3A%20%22%7B%5C%22includePrereleases%5C%22%3A%20false%2C%20%5C%22fallbackToOlderReleases%5C%22%3A%20true%2C%20%5C%22filterReleaseTitlesByRegEx%5C%22%3A%20%5C%22%5EOpenWispr%20Keyboard%20%5C%22%2C%20%5C%22versionExtractionRegEx%5C%22%3A%20%5C%22%5C%5C%5C%5Cd%2B%5C%5C%5C%5C.%5C%5C%5C%5Cd%2B%5C%5C%5C%5C.%5C%5C%5C%5Cd%2B%5C%22%2C%20%5C%22matchGroupToUse%5C%22%3A%20%5C%22%5C%22%2C%20%5C%22versionDetection%5C%22%3A%20true%7D%22%2C%20%22overrideSource%22%3A%20%22GitHub%22%7D) on your phone.
+
+To add it by hand instead, add `https://github.com/tnfssc/OpenWispr` and set:
+
+- **Filter release titles by regular expression:** `^OpenWispr Keyboard ` (the repository also publishes GNOME and macOS releases)
+- **Fallback to older releases:** on
+- **Version extraction regular expression:** `\d+\.\d+\.\d+` (tags are `keyboard-vX.Y.Z`, the app reports `vX.Y.Z`)
+
 ## Provider onboarding
 
 Open **OpenWispr voice input** in keyboard settings and choose **Groq** for the recommended fast free setup. Create a key in the [Groq Console](https://console.groq.com/keys), paste it, and keep the defaults. OpenRouter is also supported with keys from [OpenRouter](https://openrouter.ai/keys); model defaults are documented in the shared [provider guide](../../docs/providers.md).
