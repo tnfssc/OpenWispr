@@ -37,6 +37,10 @@ class FloatingBubble(
     private val description: String,
     private val onTap: () -> Unit,
     private val onLongPress: () -> Unit,
+    /** The finger went down; a tap may follow, so the mic can start before it is lifted. */
+    private val onTouchDown: () -> Unit = {},
+    /** The touch that began with [onTouchDown] turned into a drag or long press, or was cancelled. */
+    private val onTouchAbandoned: () -> Unit = {},
 ) {
     private val windowManager = context.getSystemService(WindowManager::class.java)
     private val preferences = context.getSharedPreferences("openwispr_floating_mic", Context.MODE_PRIVATE)
@@ -327,6 +331,7 @@ class FloatingBubble(
             longPressed = true
             view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
             press(false)
+            onTouchAbandoned()
             onLongPress()
         }
 
@@ -351,6 +356,7 @@ class FloatingBubble(
                     velocity = VelocityTracker.obtain().apply { addMovement(event) }
                     press(true)
                     view.postDelayed(longPress, ViewConfiguration.getLongPressTimeout().toLong())
+                    onTouchDown()
                 }
                 MotionEvent.ACTION_MOVE -> {
                     velocity?.addMovement(event)
@@ -359,6 +365,7 @@ class FloatingBubble(
                     if (!dragging && !longPressed && (abs(dx) > slop || abs(dy) > slop)) {
                         dragging = true
                         view.removeCallbacks(longPress)
+                        onTouchAbandoned()
                         // Lifted while it follows the finger.
                         view.animate().scaleX(1.08f).scaleY(1.08f).setDuration(150).start()
                     }
@@ -390,7 +397,7 @@ class FloatingBubble(
                     velocity?.recycle()
                     velocity = null
                     press(false)
-                    if (dragging) snap(0f, 0f)
+                    if (dragging) snap(0f, 0f) else if (!longPressed) onTouchAbandoned()
                 }
             }
             return true
