@@ -100,6 +100,13 @@ class AudioRecognizer(
     private var focusRequest: AudioFocusRequest? = null
 
     private var communicationDevice = "unknown"
+    private var communicationDeviceSet = false
+
+    /**
+     * Loud audio before this sample may be the start sound and does not count as talking. The
+     * default assumes the sound plays as recording starts; see [startSoundPlayed].
+     */
+    @Volatile private var startSoundEndsAt = START_SOUND_SAMPLES
 
     private fun focusAudio() {
         unfocusAudio()
@@ -163,6 +170,7 @@ class AudioRecognizer(
                     audioManager.clearCommunicationDevice()
                     return Pair(false, "")
                 } else {
+                    communicationDeviceSet = true
                     return Pair(tgtDevice.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO, tgtDevice.productName.toString())
                 }
             }
@@ -171,6 +179,9 @@ class AudioRecognizer(
     }
 
     private fun clearCommunicationDevice() {
+        // Clearing when we set nothing would also drop a device another app (a call) chose.
+        if (!communicationDeviceSet) return
+        communicationDeviceSet = false
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             audioManager.clearCommunicationDevice()
@@ -199,6 +210,14 @@ class AudioRecognizer(
     fun finish() {
         if(!isRecording) return
         onFinishRecording()
+    }
+
+    /**
+     * The caller played the start sound now, or never will ([played] false). The mic may open
+     * before the sound (on touch-down), and speech before a sound that never plays must count.
+     */
+    fun startSoundPlayed(played: Boolean = true) {
+        startSoundEndsAt = if (played) pcmSamples.position() + START_SOUND_SAMPLES else 0
     }
 
     fun cancel() {
@@ -340,7 +359,7 @@ class AudioRecognizer(
 
             // Don't set hasTalked if the start sound may still be playing, otherwise on some
             // devices the rms just explodes and `hasTalked` is always true
-            val startSoundPassed = (pcmSamples.position() > SAMPLE_RATE_HZ * 0.6)
+            val startSoundPassed = (pcmSamples.position() > startSoundEndsAt)
             if (!startSoundPassed) {
                 numConsecutiveSpeech = 0
                 numConsecutiveNonSpeech = 0
@@ -415,7 +434,12 @@ class AudioRecognizer(
         isRecording = false
         recorder?.stop()
 
-        val bluetoothInfo = setCommunicationDevice(preferBluetoothMic)
+        // Routing to a communication device sets up a call-style audio path, which delays the mic.
+        // The built-in mic needs none, so only ask for one to reach a Bluetooth headset.
+        val bluetoothInfo = if (preferBluetoothMic && isBluetoothAvailable()) setCommunicationDevice(true) else {
+            clearCommunicationDevice()
+            Pair(false, "")
+        }
 
         val task = {
             recorder?.release()
@@ -440,7 +464,8 @@ class AudioRecognizer(
             }
         }
 
-        if(recorderJob != null) {
+        // A finished job need not be waited for; launching would defer the mic by a main-loop turn.
+        if(recorderJob?.isActive == true) {
             lifecycleScope.launch {
                 recorderJob?.cancelAndJoin()
                 task()
@@ -464,6 +489,7 @@ class AudioRecognizer(
     private fun startRecording() {
         pcmSamples.clear()
         speechDetected = false
+        startSoundEndsAt = START_SOUND_SAMPLES
         val device = try {
             createRecorderAndJob(settings.recordingConfiguration.preferBluetoothMic)
         } catch (e: SecurityException) {
@@ -531,5 +557,7 @@ class AudioRecognizer(
 
     private companion object {
         const val SAMPLE_RATE_HZ = 16_000
+        // start.wav lasts 0.56 s.
+        const val START_SOUND_SAMPLES = SAMPLE_RATE_HZ * 6 / 10
     }
 }

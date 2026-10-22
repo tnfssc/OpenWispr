@@ -1,11 +1,13 @@
 package org.futo.inputmethod.latin.openwispr
 
+import android.Manifest
 import android.accessibilityservice.AccessibilityService
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.provider.Settings
 import android.view.accessibility.AccessibilityEvent
@@ -15,6 +17,7 @@ import app.openwispr.FailedSpeechStore
 import app.openwispr.FieldWriter
 import app.openwispr.FloatingBubble
 import app.openwispr.KeyboardBridge
+import app.openwispr.OpenWisprConfig
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -50,6 +53,12 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
     private var phase = DictationPhase.Idle
     private var recognizer: AudioRecognizer? = null
     private var finished = false
+    /**
+     * The mic was opened on touch-down, before the touch is known to be a tap. Until the tap the
+     * bubble shows nothing, and a drag or long press drops the recording without a sound.
+     */
+    private var armed = false
+    private var micStarted = false
     @Volatile private var failure: String? = null
 
     /** Field the recording is for; focus can move away while the provider is transcribing. */
@@ -64,7 +73,8 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
     override fun onServiceConnected() {
         super.onServiceConnected()
         soundPlayer = SoundPlayer(this)
-        bubble = FloatingBubble(this, getString(R.string.openwispr_floating_mic_title), ::onTap, ::onLongPress)
+        bubble = FloatingBubble(this, getString(R.string.openwispr_floating_mic_title), ::onTap, ::onLongPress,
+            ::onTouchDown, ::onTouchAbandoned)
         // ModelOutputSanitizer reads the keyboard locale; the keyboard may not have started yet.
         RichInputMethodManager.init(applicationContext)
         hideKeyboard = preferences.getBoolean(KeyHideKeyboard, false)
@@ -123,7 +133,28 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
         if (!hidden && field.focusedField() != null) KeyboardBridge.requestShow()
     }
 
+    /** Opening the mic takes a moment, so start it as the finger lands rather than when it lifts. */
+    private fun onTouchDown() {
+        if (phase != DictationPhase.Idle || recognizer != null) return
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return
+        val config = OpenWisprConfigStore.load(this)
+        val failedSpeech = FailedSpeechStore(noBackupFilesDir)
+        if (failedSpeech.exists() || !config.isConfigured) return
+        armed = true
+        record(config, failedSpeech)
+    }
+
+    private fun onTouchAbandoned() {
+        if (!armed) return
+        recognizer?.cancel()
+    }
+
     private fun onTap() {
+        if (armed) {
+            armed = false
+            if (micStarted) showRecording()
+            return
+        }
         when (phase) {
             DictationPhase.Idle -> startDictation()
             DictationPhase.Recording -> recognizer?.finish()
@@ -161,12 +192,25 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
             openVoiceSettings()
             return
         }
+        record(config, failedSpeech)
+    }
+
+    private fun record(config: OpenWisprConfig, failedSpeech: FailedSpeechStore) {
         target = field.focusedEditable()
-        field.forgetLast()
         finished = false
+        micStarted = false
         failure = null
         recognizer = openWisprRecognizer(this, scope, this, config, failedSpeech) { failure = it }
             .also { it.start() }
+    }
+
+    private fun showRecording() {
+        // Not on touch-down: a long press must still offer to undo the previous dictation.
+        field.forgetLast()
+        val sound = getSetting(ENABLE_SOUND)
+        if (sound) soundPlayer?.playStartSound()
+        recognizer?.startSoundPlayed(sound)
+        setPhase(DictationPhase.Recording)
     }
 
     private fun setPhase(value: DictationPhase) {
@@ -174,6 +218,7 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
         bubble?.phase = value
         if (value == DictationPhase.Idle) {
             recognizer = null
+            armed = false
             target = null
             refresh()
         }
@@ -186,12 +231,12 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
     }
 
     override fun recordingStarted(device: MicrophoneDeviceState) {
-        if (getSetting(ENABLE_SOUND)) soundPlayer?.playStartSound()
-        setPhase(DictationPhase.Recording)
+        micStarted = true
+        if (!armed) showRecording()
     }
 
     override fun updateMagnitude(magnitude: Float, state: MagnitudeState) {
-        bubble?.level = magnitude
+        if (!armed) bubble?.level = magnitude
     }
 
     override fun processing() = setPhase(DictationPhase.Processing)
@@ -203,7 +248,7 @@ class FloatingMicService : AccessibilityService(), AudioRecognizerListener {
     }
 
     override fun cancelled() {
-        if (!finished && getSetting(ENABLE_SOUND)) soundPlayer?.playCancelSound()
+        if (!finished && !armed && getSetting(ENABLE_SOUND)) soundPlayer?.playCancelSound()
         end()
     }
 

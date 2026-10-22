@@ -127,6 +127,7 @@ object InlineDictation {
 
         override fun recordingStarted(device: MicrophoneDeviceState) {
             if (playSounds) sounds.playStartSound()
+            recognizer.startSoundPlayed(playSounds)
             if (device.bluetoothAvailable) {
                 manager.getLifecycleScope().launch { context.setSetting(PREFER_BLUETOOTH, device.bluetoothActive) }
             }
