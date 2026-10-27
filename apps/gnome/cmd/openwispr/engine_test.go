@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -517,5 +518,43 @@ func TestCleanupTranscriptGroqRoutingAndFailure(t *testing.T) {
 	}
 	if got != original {
 		t.Errorf("expected fallback text on failure, got=%q", got)
+	}
+}
+
+func TestExtensionSchemaDirPrefersUserInstall(t *testing.T) {
+	userData := t.TempDir()
+	systemData := t.TempDir()
+	for _, base := range []string{userData, systemData} {
+		dir := filepath.Join(base, "gnome-shell", "extensions", extensionUUID, "schemas")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "gschemas.compiled"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("XDG_DATA_HOME", userData)
+	t.Setenv("XDG_DATA_DIRS", systemData)
+
+	want := filepath.Join(userData, "gnome-shell", "extensions", extensionUUID, "schemas")
+	if got := extensionSchemaDir(); got != want {
+		t.Fatalf("extensionSchemaDir() = %q, want %q", got, want)
+	}
+}
+
+func TestExtensionSchemaDirFallsBackToSystemInstall(t *testing.T) {
+	systemData := t.TempDir()
+	dir := filepath.Join(systemData, "gnome-shell", "extensions", extensionUUID, "schemas")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "gschemas.compiled"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_DIRS", systemData)
+
+	if got := extensionSchemaDir(); got != dir {
+		t.Fatalf("extensionSchemaDir() = %q, want %q", got, dir)
 	}
 }
