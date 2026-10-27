@@ -231,11 +231,43 @@ func (e *recorderEngine) removeCancel(token string) {
 	e.mu.Unlock()
 }
 
+// extensionSchemaDir returns the compiled schema directory of the installed
+// extension. GNOME Shell loads extension schemas from the extension's own
+// schemas/ folder, so they are not on gsettings' default search path and a
+// bare `gsettings get` fails with "No such schema". User installs win over
+// system ones, matching GNOME Shell's lookup order.
+func extensionSchemaDir() string {
+	dataHome := os.Getenv("XDG_DATA_HOME")
+	if dataHome == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			dataHome = filepath.Join(home, ".local", "share")
+		}
+	}
+	dataDirs := os.Getenv("XDG_DATA_DIRS")
+	if dataDirs == "" {
+		dataDirs = "/usr/local/share:/usr/share"
+	}
+	for _, base := range append([]string{dataHome}, filepath.SplitList(dataDirs)...) {
+		if base == "" {
+			continue
+		}
+		dir := filepath.Join(base, "gnome-shell", "extensions", extensionUUID, "schemas")
+		if _, err := os.Stat(filepath.Join(dir, "gschemas.compiled")); err == nil {
+			return dir
+		}
+	}
+	return ""
+}
+
 // readSecret reads an API key from the extension's GSettings schema. Secrets
 // are never transported over the session D-Bus bus; the engine reads them
 // directly from dconf via gsettings, which is always present on GNOME.
 var readSecret = func(key string) (string, error) {
-	out, err := exec.Command("gsettings", "get", gsettingsSchema, key).Output()
+	args := []string{"get", gsettingsSchema, key}
+	if dir := extensionSchemaDir(); dir != "" {
+		args = append([]string{"--schemadir", dir}, args...)
+	}
+	out, err := exec.Command("gsettings", args...).Output()
 	if err != nil {
 		return "", fmt.Errorf("read gsettings key %s: %w", key, err)
 	}
