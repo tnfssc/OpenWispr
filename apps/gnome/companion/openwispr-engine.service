@@ -21,6 +21,9 @@ ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=true
 ReadWritePaths=%h/.config %h/.cache
+# Failed recordings are kept for retry under ~/.local/state/openwispr.
+StateDirectory=openwispr
+StateDirectoryMode=0700
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 CapabilityBoundingSet=
 SystemCallFilter=@system-service
